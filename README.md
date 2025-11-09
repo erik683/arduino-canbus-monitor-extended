@@ -2,7 +2,43 @@
 
 CAN BUS monitoring software based on Arduino with Seeduino/ElecFreaks CAN BUS shield based on MCP2515 (Numerous other MCP2515 based CAN BUS modules from ebay and aliexpress work well to).
 
-This software implements CAN ASCII / Serial CAN / SLCAN protocol compatible with Lawicel CAN232/CANUSB. 
+This software implements CAN ASCII / Serial CAN / SLCAN protocol compatible with Lawicel CAN232/CANUSB.
+
+## PlatformIO Setup
+
+This project is configured for [PlatformIO](https://platformio.org/), a professional development environment for embedded systems.
+
+### Prerequisites
+1. Install [PlatformIO IDE for VSCode](https://platformio.org/install/ide) or [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation.html)
+2. Open this project in VS Code with PlatformIO extension
+
+### Building and Uploading
+```bash
+# Build the project
+pio run
+
+# Upload to Arduino
+pio run --target upload
+
+# Monitor serial output
+pio device monitor
+```
+
+### Configuration
+- **Board**: Arduino Uno (configurable in `platformio.ini`)
+- **Libraries**: Seeed-Studio CAN_BUS_Shield (automatically downloaded)
+- **Monitor**: 115200 baud rate
+
+### Changing Boards
+To use a different Arduino board, edit `platformio.ini`:
+```ini
+[env:mega2560]
+platform = atmelavr
+board = megaatmega2560
+framework = arduino
+```
+
+## PC Counterpart Software
 
 As for PC counterpart software I personally used and can recommend two tools:
 

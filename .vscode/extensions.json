@@ -1,0 +1,6 @@
+{
+    "recommendations": [
+        "platformio.platformio-ide",
+        "davidgomes.platformio-ide-cursor"
+    ]
+}
