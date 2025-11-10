@@ -14,8 +14,15 @@
 #include <SPI.h>
 #include "mcp_can.h"
 #include "can-232.h"
+#include "lcd_diagnostics.h"
 
+#ifndef ENABLE_CAN_DEBUG_LOGGING
+#define ENABLE_CAN_DEBUG_LOGGING 0
+#endif
+
+#if ENABLE_CAN_DEBUG_LOGGING
 #define LOGGING_ENABLED
+#endif
 
 #ifdef LOGGING_ENABLED
 #define dbg_begin(x) debug.begin(x)
@@ -91,7 +98,7 @@ void Can232::setFilterFunc(INT8U (*userFunc)(INT32U)) {
 
 void Can232::loopFunc() {
     if (stringComplete) {
-        int len = inputString.length();
+        size_t len = inputString.length();
         if (len > 0 && len < LW232_FRAME_MAX_SIZE) {
             strcpy((char*)lw232Message, inputString.c_str());
             exec();
@@ -196,6 +203,7 @@ INT8U Can232::parseAndRunCommand() {
         // C[CR] Close the CAN channel.
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
             lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
+            LcdDiagnostics::showCanClosed();
         }
         else {
             ret = LW232_ERR;
@@ -408,7 +416,8 @@ INT8U Can232::receiveSingleFrame() {
             ret = LW232_ERR; // address if totally wrong
         }
         else if (checkPassFilter(lw232CanId)) {// do we want to skip some addresses?
-            if (isExtendedFrame()) {
+            const INT8U extendedFrame = isExtendedFrame();
+            if (extendedFrame) {
                 Serial.print(LW232_TR29);
                 HexHelper::printFullByte(HIGH_BYTE(HIGH_WORD(lw232CanId)));
                 HexHelper::printFullByte(LOW_BYTE(HIGH_WORD(lw232CanId)));
@@ -440,6 +449,7 @@ INT8U Can232::receiveSingleFrame() {
                 HexHelper::printFullByte(HIGH_BYTE(LOW_WORD(time)));
                 HexHelper::printFullByte(LOW_BYTE(LOW_WORD(time)));
             }
+            LcdDiagnostics::showFrame(lw232CanId, lw232PacketLen, lw232Buffer, extendedFrame != 0);
         }
     }
     else {
@@ -467,10 +477,17 @@ INT8U Can232::checkPassFilter(INT32U addr) {
 
 INT8U Can232::openCanBus() {
     INT8U ret = LW232_OK;
+    LcdDiagnostics::showCanAttempt(lw232CanSpeedSelection, lw232McpModuleClock);
+    INT8U initStatus = CAN_OK;
 #ifndef _MCP_FAKE_MODE_
-    if (CAN_OK != lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock))
-        ret = LW232_ERR;
+    initStatus = lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock);
 #endif
+    if (initStatus != CAN_OK) {
+        ret = LW232_ERR;
+        LcdDiagnostics::showCanError(lw232CanSpeedSelection, lw232McpModuleClock, initStatus);
+    } else {
+        LcdDiagnostics::showCanReady(lw232CanSpeedSelection, lw232McpModuleClock);
+    }
     return ret;
 }
 

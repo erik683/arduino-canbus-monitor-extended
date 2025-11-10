@@ -1,25 +1,29 @@
-/*****************************************************************************************
-* This is implementation of CAN BUS ASCII protocol based on LAWICEL v1.3 serial protocol
-*  of CAN232/CANUSB device (http://www.can232.com/docs/can232_v3.pdf)
-*
-* Made for Arduino with Seeduino/ElecFreaks CAN BUS Shield based on MCP2515
-*
-* Copyright (C) 2015 Anton Viktorov <latonita@yandex.ru>
-*                                    https://github.com/latonita/arduino-canbus-monitor
-*
-* This library is free software. You may use/redistribute it under The MIT License terms. 
-*
-*****************************************************************************************/
+/*
+ * Arduino CAN BUS Monitor
+ * Implementation of LAWICEL CAN232 v1.3 ASCII protocol
+ * For CAN232/CANUSB devices: http://www.can232.com/docs/can232_v3.pdf
+ *
+ * Requires Arduino with Seeduino/ElecFreaks CAN BUS Shield (MCP2515)
+ *
+ * Copyright (C) 2015 Anton Viktorov <latonita@yandex.ru>
+ *                                    https://github.com/latonita/arduino-canbus-monitor
+ *
+ * This library is free software. You may use/redistribute it under The MIT License terms.
+ */
 
 #include <SPI.h>
 #include "mcp_can.h"
 #include "can-232.h"
-#include "SoftwareSerial.h"
+#include "lcd_diagnostics.h"
 
 // #define DEBUG_MODE  // Disabled for SavvyCAN LAWICEL compatibility
 
 void setup() {
-	  Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200. 
+    LcdDiagnostics::begin();
+    LcdDiagnostics::showSplash();
+
+    Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200.
+    LcdDiagnostics::showSerialReady(LW232_DEFAULT_BAUD_RATE);
 
         // Can232::init  (RATE, CLOCK)
         // Rates: CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_500KBPS, CAN_1000KBPS, CAN_83K3BPS
@@ -31,6 +35,8 @@ void setup() {
 //        Can232::init();             // rate and clock = LW232_DEFAULT_CAN_RATE and LW232_DEFAULT_CLOCK_FREQ
 //        Can232::init(CAN_125KBPS);  // rate = 125, clock = LW232_DEFAULT_CLOCK_FREQ
     Can232::init(CAN_125KBPS, MCP_16MHz); // set default rate you need here and clock frequency of CAN shield. Typically it is 16MHz, but on some MCP2515 + TJA1050 it is 8Mhz
+
+    LcdDiagnostics::showCanClosed();
 
 
     // optional custom packet filter to reduce number of messages comingh through to canhacker
@@ -69,4 +75,3 @@ void loop() {
 void serialEvent() {
     Can232::serialEvent();
 }
-
