@@ -1,0 +1,19 @@
+CompileFlags:
+  Add:
+    - -DF_CPU=16000000L
+    - -DARDUINO=10805
+    - -DARDUINO_AVR_UNO
+    - -DARDUINO_ARCH_AVR
+    - -DDEBUG
+    - -std=c++11
+    - -I/home/erikm/.platformio/packages/framework-arduino-avr/cores/arduino
+    - -I/home/erikm/.platformio/packages/framework-arduino-avr/variants/standard
+    - -I/home/erikm/.platformio/packages/framework-arduino-avr/libraries/SPI/src
+    - -I/home/erikm/.platformio/packages/framework-arduino-avr/libraries/Wire/src
+    - -I/home/erikm/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src
+    - -I/home/erikm/.platformio/packages/toolchain-atmelavr/avr/include
+    - -I/home/erikm/.platformio/packages/toolchain-atmelavr/lib/gcc/avr/7.3.0/include
+    - -I/home/erikm/.platformio/packages/toolchain-atmelavr/lib/gcc/avr/7.3.0/include-fixed
+    - -I/home/erikm/.platformio/libdeps/uno/LiquidCrystal/src
+    - -Isrc
+  CompilationDatabase: "."

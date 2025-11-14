@@ -350,6 +350,7 @@
 #define MCP_8MHz_100kBPS_CFG2 (0xb4)
 #define MCP_8MHz_100kBPS_CFG3 (0x06)
 
+// Additional 8MHz baud rate configurations for extended compatibility
 #define MCP_8MHz_95kBPS_CFG1 (0x01)
 #define MCP_8MHz_95kBPS_CFG2 (0xAD)
 #define MCP_8MHz_95kBPS_CFG3 (0x07)

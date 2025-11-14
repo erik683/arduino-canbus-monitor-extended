@@ -1,6 +1,8 @@
 {
     "recommendations": [
         "platformio.platformio-ide",
-        "davidgomes.platformio-ide-cursor"
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-python.python",
+        "eamodio.gitlens"
     ]
 }

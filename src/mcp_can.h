@@ -100,6 +100,8 @@ public:
     INT8U begin(INT8U speedset, const INT8U clockset = MCP_16MHz);  /* init can                     */
     INT8U init_Mask(INT8U num, INT8U ext, INT32U ulData);           /* init Masks                   */
     INT8U init_Filt(INT8U num, INT8U ext, INT32U ulData);           /* init filters                 */
+    INT8U getInterruptFlags(void);
+    void getTxCtrlRegisters(INT8U *txb0, INT8U *txb1, INT8U *txb2);
     INT8U sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf);   /* send buf                     */
     INT8U sendMsgBuf(INT32U id, INT8U ext, INT8U len, INT8U *buf);   /* send buf                     */
     INT8U readMsgBuf(INT8U *len, INT8U *buf);                       /* read buf                     */
@@ -110,6 +112,7 @@ public:
     INT32U getCanId(void);                                          /* get can id when receive      */
     INT8U isRemoteRequest(void);                                    /* get RR flag when receive     */
     INT8U isExtendedFrame(void);                                    /* did we recieve 29bit frame?  */
+    INT8U setMode(INT8U mode);                                      /* set CAN controller mode      */
 };
 
 #endif

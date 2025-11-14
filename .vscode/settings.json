@@ -17,8 +17,9 @@
     "editor.tabSize": 4,
     "editor.insertSpaces": true,
     
-    // C/C++ settings
-    "C_Cpp.intelliSenseEngine": "default",
+    // C/C++ settings - use clangd for Arduino projects
+    "C_Cpp.intelliSenseEngine": "disabled",
+    // clangd.path removed - let the clangd extension manage it automatically
     
     // Exclude build artifacts from file explorer
     "files.exclude": {
@@ -32,6 +33,41 @@
         "**/.pio": true,
         "**/.pioenvs": true,
         "**/.piolibdeps": true
-    }
+    },
+    
+    // Git settings - enable Git functionality
+    "git.enabled": true,
+    "git.autoRepositoryDetection": true,
+    
+    // GitLens settings - enable context menu items including "Add to .gitignore"
+    "gitlens.menus": {
+        "explorer": {
+            "file": true,
+            "folder": true
+        },
+        "scm": {
+            "file": true,
+            "folder": true
+        },
+        "editor": {
+            "file": true
+        }
+    },
+    "gitlens.menus.file": true,
+    "gitlens.menus.folder": true,
+    "gitlens.menus.explorer": true,
+    "gitlens.menus.scm": true,
+    "gitlens.menus.editor": true,
+    
+    // PowerShell settings - suppress errors in WSL workspace (scripts are for Windows only)
+    // Note: PowerShell extension will still work normally in Windows workspaces
+    // To disable PowerShell extension in this WSL workspace only:
+    // 1. Press Ctrl+Shift+X to open Extensions
+    // 2. Search for "PowerShell"
+    // 3. Click the gear icon → "Disable (Workspace)"
+    "powershell.powerShellAdditionalExePaths": {},
+    "powershell.enableProfileLoading": false,
+    // Suppress PowerShell not found errors in WSL
+    "powershell.integratedConsole.showOnStartup": false
 }
 

@@ -22,6 +22,7 @@
 //#endif
 
 #include "mcp_can.h"
+#include "mcp_can_dfs.h"
 #include "SoftwareSerial.h"
 
 #define LW232_LAWICEL_VERSION_STR     "V1013"
@@ -37,13 +38,13 @@
 //     S - supports not declared 83.3 rate straight away (S9)     
 //         refer to https://github.com/latonita/CAN_BUS_Shield fork with 83.3 support, easy to add.
 //     F - returns MCP2515 error flags
-//     Z - extra Z2 option enables 4 byte timestamp vs standard 2 byte (60000ms max)
+//     Z - toggle LAWICEL-compatible 2 byte timestamp (60000ms max)
 //
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                                   
 //                          CODE   SUPPORTED   SYNTAX               DESCRIPTION     
 //
-#define LW232_CMD_SETUP     'S' //   YES+      Sn[CR]               Setup with standard CAN bit-rates where n is 0-8.
+#define LW232_CMD_SETUP     'S' //   YES+      Sn[CR]               Setup with standard CAN bit-rates where n is 0-9.
                                 //                                  S0 10Kbit          S4 125Kbit         S8 1Mbit
                                 //                                  S1 20Kbit          S5 250Kbit         S9 83.3Kbit
                                 //                                  S2 50Kbit          S6 500Kbit
@@ -67,7 +68,7 @@
 #define LW232_CMD_VERSION1  'V' //   YES       v[CR]                Get Version number of both CAN232 hardware and software
 #define LW232_CMD_VERSION2  'v' //   YES       V[CR]                Get Version number of both CAN232 hardware and software
 #define LW232_CMD_SERIAL    'N' //   YES       N[CR]                Get Serial number of the CAN232.
-#define LW232_CMD_TIMESTAMP 'Z' //   YES+      Zn[CR]               Sets Time Stamp ON/OFF for received frames only. EXTENSION to LAWICEL: Z2 - millis() timestamp w/o standard 60000ms cycle
+#define LW232_CMD_TIMESTAMP 'Z' //   YES       Zn[CR]               Sets Time Stamp ON/OFF for received frames only.
 #define LW232_CMD_AUTOSTART 'Q' //   YES  todo     Qn[CR]               Auto Startup feature (from power on). 
 
 #define LOW_BYTE(x)     ((unsigned char)((x)&0xFF))
@@ -112,7 +113,7 @@
 
 #define LW232_STATUS_CAN_CLOSED        0x00
 #define LW232_STATUS_CAN_OPEN_NORMAL   0x01
-#define LW232_STATUS_CAN_OPEN_LISTEN   0x01
+#define LW232_STATUS_CAN_OPEN_LISTEN   0x02
 
 #define LW232_FRAME_MAX_LENGTH         0x08
 #define LW232_FRAME_MAX_SIZE           (sizeof("Tiiiiiiiildddddddddddddddd\r")+1)
@@ -130,10 +131,10 @@
 #define LW232_AUTOSTART_ON_NORMAL      0x01
 #define LW232_AUTOSTART_ON_LISTEN      0x02
 
+#define LW232_EEPROM_ADDR_TIMESTAMP    0x00
+
 #define LW232_TIMESTAMP_OFF            0x00
 #define LW232_TIMESTAMP_ON_NORMAL      0x01
-#define LW232_TIMESTAMP_ON_EXTENDED    0x02
-
 #define LW232_OFFSET_STD_PKT_LEN       0x04
 #define LW232_OFFSET_STD_PKT_DATA      0x05
 #define LW232_OFFSET_EXT_PKT_LEN       0x09
@@ -174,6 +175,10 @@ private:
     INT8U (*userAddressFilterFunc)(INT32U addr) = 0;
 
     MCP_CAN lw232CAN = MCP_CAN(LW232_CAN_BUS_SHIELD_CS_PIN);
+    INT8U lw232SerialBaudIndex = 0x01;          // Default to 115200 (index 1)
+    INT8U lw232PendingSerialBaudIndex = 0xFF;   // 0xFF => no scheduled change
+    bool lw232BitrateConfigured = false;
+    INT8U readLawicelStatusFlags();
 
     INT8U lw232CanSpeedSelection = CAN_83K3BPS;
     INT8U lw232McpModuleClock = MCP_16MHz;
@@ -197,12 +202,17 @@ private:
     INT8U parseAndRunCommand();
     INT8U exec();
 
+    void scheduleSerialBaudChange(INT8U idx);
+    void applyPendingSerialBaudChange();
+    void loadTimestampPreference();
+    void persistTimestampPreference();
+
     INT8U checkReceive();
     INT8U readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[]);
     INT8U receiveSingleFrame();
     INT8U isExtendedFrame();
     INT8U checkPassFilter(INT32U addr);
-    INT8U openCanBus();
+    INT8U openCanBus(INT8U mode = MODE_NORMAL);
     
     INT8U sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf);
 

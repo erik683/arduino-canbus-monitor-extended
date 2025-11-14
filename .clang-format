@@ -1,0 +1,84 @@
+---
+# Arduino-specific clang-format configuration
+# Based on common Arduino coding style
+
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Basic formatting
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+
+# Brace and bracket formatting
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+# Function and class formatting
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: All
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+
+# Spacing
+SpacesBeforeTrailingComments: 1
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+
+# Includes
+IncludeCategories:
+  - Regex: '^<Arduino\.h>'
+    Priority: 1
+  - Regex: '^<SPI\.h>'
+    Priority: 2
+  - Regex: '^<Wire\.h>'
+    Priority: 2
+  - Regex: '^<SoftwareSerial\.h>'
+    Priority: 2
+  - Regex: '^".*"'
+    Priority: 3
+  - Regex: '^<.*\.h>'
+    Priority: 4
+SortIncludes: true
+
+# Column limits (reasonable for Arduino displays/editors)
+ColumnLimit: 100
+PenaltyBreakBeforeFirstCallParameter: 100
+PenaltyBreakString: 1000
+PenaltyBreakComment: 300
+PenaltyReturnTypeOnItsOwnLine: 60
+
+# Pointer alignment
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# Other settings
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: false
+AlignTrailingComments: true
+BinPackArguments: true
+BinPackParameters: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: true
+DerivePointerAlignment: false
+IndentCaseLabels: false
+KeepEmptyLinesAtTheStartOfBlocks: true
+NamespaceIndentation: None
+PenaltyIndentedWhitespace: 0

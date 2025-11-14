@@ -1,14 +1,15 @@
 # CANUSB Clone – Future Goals
 
-Last reviewed: commit `c0b7e7496e3ea1ae57f17d018ede2aa51aaca9a5`
+Last reviewed: commit `a3e6a493c430eff82fbd4c6f8be7c917954c470d`
 
 The notes below capture the CANUSB-specific protocol gaps and “nice to have” improvements that we can defer until after the CAN232 parity push. Each item references the sections in the official LAWICEL CANUSB manual found under `docs/`.
 
 ## High-Value Targets
 
-1. **Lawicel-compliant status flags (`F` command)**  
-   - Emit the documented `Fnxx` bitmap instead of forwarding MCP2515 `EFLG`.  
-   - Preserve a debug hook (e.g., `#if ENABLE_CAN_DEBUG_LOGGING`) to print native MCP2515 faults without exposing them to the host.
+1. **Lawicel-compliant status flags (`F` command)** – *Complete*  
+   - `F` now emits the documented `Fnxx` bitmap and enforces the “channel open” requirement from the CANUSB manual.  
+   - Still preserve a debug hook (e.g., `#if ENABLE_CAN_DEBUG_LOGGING`) for raw MCP2515 dumps without surfacing them over LAWICEL responses.  
+   - Follow-up: implement optional `F1` extended diagnostics once we spec the payload.
 
 2. **Device identity parity (`V/v/N` commands)**  
    - Mirror the CANUSB version string format, including hardware/firmware rev pairs.  

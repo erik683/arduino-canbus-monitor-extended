@@ -1,7 +1,7 @@
 /*****************************************************************************************
-* This is implementation of CAN BUS ASCII protocol based on LAWICEL v1.3 serial protocol
-*  of CAN232/CANUSB device (http://www.can232.com/docs/can232_v3.pdf)
-*
+ * This is implementation of CAN BUS ASCII protocol based on LAWICEL v1.3 serial protocol
+ *  of CAN232/CANUSB device (http://www.can232.com/docs/can232_v3.pdf)
+ *
 * Made for Arduino with Seeduino/ElecFreaks CAN BUS Shield based on MCP2515
 *
 * Copyright (C) 2015 Anton Viktorov <latonita@yandex.ru>
@@ -12,9 +12,11 @@
 *****************************************************************************************/
 
 #include <SPI.h>
+#include <EEPROM.h>
 #include "mcp_can.h"
 #include "can-232.h"
 #include "lcd_diagnostics.h"
+#include "runtime_stats.h"
 
 #ifndef ENABLE_CAN_DEBUG_LOGGING
 #define ENABLE_CAN_DEBUG_LOGGING 0
@@ -48,6 +50,8 @@
   //#define debug Serial
 #endif
 
+// Singleton instance - intentionally uses new() without delete() for embedded systems
+// where memory is managed throughout the program lifecycle
 Can232* Can232::_instance = 0;
 
 Can232* Can232::instance() {
@@ -62,6 +66,7 @@ void Can232::init(INT8U defaultCanSpeed, const INT8U clock) {
 
     instance()->lw232CanSpeedSelection = defaultCanSpeed;
     instance()->lw232McpModuleClock = clock;
+    instance()->lw232BitrateConfigured = false;
     instance()->initFunc();
 }
 
@@ -83,13 +88,11 @@ void Can232::initFunc() {
     }
     // lw232AutoStart = true; //todo: read from eeprom
     // lw232AutoPoll = false; //todo: read from eeprom
-    //  lw232TimeStamp = //read from eeprom
-    //    lw232Message[0] = 'Z';    lw232Message[1] = '1'; exec();
-    //if (lw232AutoStart) {
-        inputString = "O\0x0D";
-        stringComplete = true;
-        loopFunc();
-    //}
+    loadTimestampPreference();
+    lw232SerialBaudIndex = 0x01;
+    lw232PendingSerialBaudIndex = 0xFF;
+    // Channel stays closed until host selects a bitrate (LAWICEL default).
+    lw232BitrateConfigured = false;
 }
 
 void Can232::setFilterFunc(INT8U (*userFunc)(INT32U)) {
@@ -121,7 +124,9 @@ void Can232::loopFunc() {
 void Can232::serialEventFunc() {
     while (Serial.available()) {
         char inChar = (char)Serial.read();
-        inputString += inChar;
+        if (inputString.length() < LW232_INPUT_STRING_BUFFER_SIZE - 1) {
+            inputString += inChar;
+        }
         if (inChar == LW232_CR) {
             stringComplete = true;
         }
@@ -130,6 +135,7 @@ void Can232::serialEventFunc() {
 
 INT8U Can232::exec() {
     dbg2("Command received:", inputString);
+    statsRecordCommand();
     lw232LastErr = parseAndRunCommand();
     switch (lw232LastErr) {
     case LW232_OK:
@@ -151,22 +157,30 @@ INT8U Can232::exec() {
     default:
         Serial.write(LW232_RET_ASCII_ERROR);
     }
+    applyPendingSerialBaudChange();
     return 0;
 }
 
 INT8U Can232::parseAndRunCommand() {
     INT8U ret = LW232_OK;
     INT8U idx = 0;
-    INT8U err = 0;
-
     lw232LastErr = LW232_OK;
+
+    // Check minimum message length
+    if (strlen((char*)lw232Message) < 1) {
+        return LW232_ERR;
+    }
 
     switch (lw232Message[0]) {
         case LW232_CMD_SETUP:
         // Sn[CR] Setup with standard CAN bit-rates where n is 0-9.
-        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+        if (strlen((char*)lw232Message) < 2) {
+            ret = LW232_ERR;
+        }
+        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             idx = HexHelper::parseNibbleWithLimit(lw232Message[1], LW232_CAN_BAUD_NUM);
 			      lw232CanSpeedSelection = lw232CanBaudRates[idx];
+            lw232BitrateConfigured = true;
         }
         else {
             ret = LW232_ERR;
@@ -177,8 +191,11 @@ INT8U Can232::parseAndRunCommand() {
         ret = LW232_ERR; break;
         case LW232_CMD_OPEN:
         // O[CR] Open the CAN channel in normal mode (sending & receiving).
-        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
-            ret = openCanBus();
+        if (!lw232BitrateConfigured) {
+            ret = LW232_ERR;
+        }
+        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+            ret = openCanBus(MODE_NORMAL);
             if (ret == LW232_OK) {
               lw232CanChannelMode = LW232_STATUS_CAN_OPEN_NORMAL;
             }
@@ -189,8 +206,11 @@ INT8U Can232::parseAndRunCommand() {
         break;
         case LW232_CMD_LISTEN:
         // L[CR] Open the CAN channel in listen only mode (receiving).
-        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
-            ret = openCanBus();
+        if (!lw232BitrateConfigured) {
+            ret = LW232_ERR;
+        }
+        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+            ret = openCanBus(MODE_LISTENONLY);
             if (ret == LW232_OK) {
               lw232CanChannelMode = LW232_STATUS_CAN_OPEN_LISTEN;
             }
@@ -244,6 +264,9 @@ INT8U Can232::parseAndRunCommand() {
               ret = LW232_OK;
             }
         }
+        else {
+            ret = LW232_ERR;
+        }
         break;
     case LW232_CMD_RTR11:
         // riiil[CR] Transmit an standard RTR (11bit) CAN frame.
@@ -290,12 +313,14 @@ INT8U Can232::parseAndRunCommand() {
         // A[CR] Polls incomming FIFO for CAN frames (all pending frames)
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED && lw232AutoPoll == LW232_AUTOPOLL_OFF) {
             while (CAN_MSGAVAIL == checkReceive()) {
-                ret = ret ^ receiveSingleFrame();
-                if (ret != CAN_OK)
+                INT8U frameRet = receiveSingleFrame();
+                if (frameRet != LW232_OK) {
+                    ret = frameRet;
                     break;
+                }
                 Serial.write(LW232_CR);
             }
-            if (ret == CAN_OK)
+            if (ret == LW232_OK)
                 Serial.print(LW232_ALL);
         } else {
             ret = LW232_ERR;
@@ -303,15 +328,19 @@ INT8U Can232::parseAndRunCommand() {
         break;
     case LW232_CMD_FLAGS:
         // F[CR] Read Status Flags.
-        // LAWICEL CAN232 and CANUSB have some specific errors which differ from MCP2515/MCP2551 errors. We just return MCP2515 error.
-        Serial.print(LW232_FLAG);
-        if (lw232CAN.checkError(&err) == CAN_OK) 
-            err = 0;
-        HexHelper::printFullByte(err & MCP_EFLG_ERRORMASK);
+        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+        } else {
+            Serial.print(LW232_FLAG);
+            HexHelper::printFullByte(readLawicelStatusFlags());
+        }
         break;
     case LW232_CMD_AUTOPOLL:
         // Xn[CR] Sets Auto Poll/Send ON/OFF for received frames.
-        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+        if (strlen((char*)lw232Message) < 2) {
+            ret = LW232_ERR;
+        }
+        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             lw232AutoPoll = (lw232Message[1] == LW232_ON_ONE) ? LW232_AUTOPOLL_ON : LW232_AUTOPOLL_OFF;
             //todo: save to eeprom
         } else {
@@ -327,11 +356,28 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_ACC_MASK:
         // mxxxxxxxx[CR] Sets Acceptance Mask Register (AMn Register of SJA1000).
         ret = LW232_ERR_NOT_IMPLEMENTED; break;
-    case LW232_CMD_UART:
-        // Un[CR] Setup UART with a new baud rate where n is 0-6.
-        idx = HexHelper::parseNibbleWithLimit(lw232Message[1], LW232_UART_BAUD_NUM);
-        Serial.begin(lw232SerialBaudRates[idx]);
+    case LW232_CMD_UART: {
+        // Un[CR] Setup UART with a new baud rate where n is 0-6. Bare U[CR] reports the current selection.
+        const INT8U modeChar = lw232Message[1];
+        if (modeChar == LW232_CR || modeChar == 0) {
+            Serial.print(LW232_CMD_UART);
+            HexHelper::printNibble(lw232SerialBaudIndex);
+            break;
+        }
+        if (modeChar < '0' || modeChar > ('0' + LW232_UART_BAUD_NUM - 1)) {
+            ret = LW232_ERR;
+            break;
+        }
+        idx = modeChar - '0';
+        if (idx >= LW232_UART_BAUD_NUM) {
+            ret = LW232_ERR;
+            break;
+        }
+        if (idx != lw232SerialBaudIndex) {
+            scheduleSerialBaudChange(idx);
+        }
         break;
+    }
     case LW232_CMD_VERSION1:
     case LW232_CMD_VERSION2:
         // V[CR] Get Version number of both CAN232 hardware and software
@@ -341,27 +387,42 @@ INT8U Can232::parseAndRunCommand() {
         // N[CR] Get Serial number of the CAN232.
         Serial.print(LW232_LAWICEL_SERIAL_NUM);
         break;
-    case LW232_CMD_TIMESTAMP:
-        // Zn[CR] Sets Time Stamp ON/OFF for received frames only. Z0 - OFF, Z1 - Lawicel's timestamp 2 bytes, Z2 - arduino timestamp 4 bytes.
-        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
-            // lw232TimeStamp = (lw232Message[1] == LW232_ON_ONE); 
-            if (lw232Message[1] == LW232_ON_ONE) {
-                lw232TimeStamp = LW232_TIMESTAMP_ON_NORMAL;
-            }
-            else if (lw232Message[1] == LW232_ON_TWO) {
-                lw232TimeStamp = LW232_TIMESTAMP_ON_EXTENDED;
-            }
-            else {
-                lw232TimeStamp = LW232_TIMESTAMP_OFF;
-            }
+    case LW232_CMD_TIMESTAMP: {
+        // Zn[CR] Sets Time Stamp ON/OFF for received frames only. Bare Z[CR] reports the current mode.
+        const INT8U modeChar = lw232Message[1];
+        const bool hasArgument = (modeChar != LW232_CR && modeChar != 0);
+        if (!hasArgument) {
+            Serial.print(LW232_CMD_TIMESTAMP);
+            Serial.print(lw232TimeStamp == LW232_TIMESTAMP_ON_NORMAL ? LW232_ON_ONE : LW232_OFF);
+            break;
+        }
+        if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+            break;
+        }
+        INT8U newMode;
+        if (modeChar == LW232_ON_ONE) {
+            newMode = LW232_TIMESTAMP_ON_NORMAL;
+        }
+        else if (modeChar == LW232_OFF) {
+            newMode = LW232_TIMESTAMP_OFF;
         }
         else {
             ret = LW232_ERR;
+            break;
+        }
+        if (newMode != lw232TimeStamp) {
+            lw232TimeStamp = newMode;
+            persistTimestampPreference();
         }
         break;
+    }
     case LW232_CMD_AUTOSTART:
         // Qn[CR] Auto Startup feature (from power on).
-        if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+        if (strlen((char*)lw232Message) < 2) {
+            ret = LW232_ERR;
+        }
+        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             if (lw232Message[1] == LW232_ON_ONE) {
                 lw232AutoStart = LW232_AUTOSTART_ON_NORMAL;
             }
@@ -436,19 +497,12 @@ INT8U Can232::receiveSingleFrame() {
                 HexHelper::printFullByte(lw232Buffer[idx]);
             }
             //write timestamp if needed
-            if (lw232TimeStamp != LW232_TIMESTAMP_OFF) {
-                INT32U time = millis();
-                if (lw232TimeStamp == LW232_TIMESTAMP_ON_NORMAL) { 
-                    // standard LAWICEL protocol. two bytes.
-                    time %= 60000;  
-                } else {
-                    // non standard protocol - 4 bytes timestamp
-                    HexHelper::printFullByte(HIGH_BYTE(HIGH_WORD(time)));
-                    HexHelper::printFullByte(LOW_BYTE(HIGH_WORD(time)));
-                }
-                HexHelper::printFullByte(HIGH_BYTE(LOW_WORD(time)));
-                HexHelper::printFullByte(LOW_BYTE(LOW_WORD(time)));
+            if (lw232TimeStamp == LW232_TIMESTAMP_ON_NORMAL) {
+                INT16U timeMs = millis() % 60000;  // LAWICEL timer rolls over every 60 seconds
+                HexHelper::printFullByte(HIGH_BYTE(timeMs));
+                HexHelper::printFullByte(LOW_BYTE(timeMs));
             }
+            statsRecordRxFrame();
             LcdDiagnostics::showFrame(lw232CanId, lw232PacketLen, lw232Buffer, extendedFrame != 0);
         }
     }
@@ -475,12 +529,16 @@ INT8U Can232::checkPassFilter(INT32U addr) {
 	return (*userAddressFilterFunc)(addr);
 }
 
-INT8U Can232::openCanBus() {
+INT8U Can232::openCanBus(INT8U mode) {
     INT8U ret = LW232_OK;
     LcdDiagnostics::showCanAttempt(lw232CanSpeedSelection, lw232McpModuleClock);
     INT8U initStatus = CAN_OK;
 #ifndef _MCP_FAKE_MODE_
     initStatus = lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock);
+    if (initStatus == CAN_OK) {
+        // Set the requested mode after successful initialization
+        lw232CAN.setMode(mode);
+    }
 #endif
     if (initStatus != CAN_OK) {
         ret = LW232_ERR;
@@ -494,7 +552,11 @@ INT8U Can232::openCanBus() {
 
 INT8U Can232::sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf) {
 #ifndef _MCP_FAKE_MODE_
-    return lw232CAN.sendMsgBuf(id, ext, rtr, len, buf);
+    INT8U status = lw232CAN.sendMsgBuf(id, ext, rtr, len, buf);
+    if (status == CAN_OK) {
+        statsRecordTxFrame();
+    }
+    return status;
 #else
     Serial.print("<sending:");
     Serial.print(id, HEX);
@@ -508,11 +570,82 @@ INT8U Can232::sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf)
     Serial.print(',');
     int i;
     for (i = 0; i < len; i++) printFullByte(buf[i]);
+    statsRecordTxFrame();
     return CAN_OK;
 #endif
 }
 
 
+void Can232::scheduleSerialBaudChange(INT8U idx) {
+    lw232PendingSerialBaudIndex = idx;
+}
+
+void Can232::applyPendingSerialBaudChange() {
+    if (lw232PendingSerialBaudIndex == 0xFF) {
+        return;
+    }
+    Serial.flush();
+    delay(10);
+    Serial.end();
+    Serial.begin(lw232SerialBaudRates[lw232PendingSerialBaudIndex]);
+    lw232SerialBaudIndex = lw232PendingSerialBaudIndex;
+    lw232PendingSerialBaudIndex = 0xFF;
+    LcdDiagnostics::showSerialReady(lw232SerialBaudRates[lw232SerialBaudIndex]);
+}
+
+void Can232::loadTimestampPreference() {
+    INT8U stored = EEPROM.read(LW232_EEPROM_ADDR_TIMESTAMP);
+    if (stored == LW232_TIMESTAMP_ON_NORMAL || stored == LW232_TIMESTAMP_OFF) {
+        lw232TimeStamp = stored;
+    } else {
+        lw232TimeStamp = LW232_TIMESTAMP_OFF;
+        EEPROM.update(LW232_EEPROM_ADDR_TIMESTAMP, LW232_TIMESTAMP_OFF);
+    }
+}
+
+void Can232::persistTimestampPreference() {
+    EEPROM.update(LW232_EEPROM_ADDR_TIMESTAMP, lw232TimeStamp);
+}
+
+
+INT8U Can232::readLawicelStatusFlags() {
+    // Mirrors LAWICEL CANUSB manual bit order: RXQ full, TXQ full, EI, DOI, -, EPI, ALI, BEI.
+    INT8U status = 0;
+    const INT8U interruptFlags = lw232CAN.getInterruptFlags();
+    const bool rx0Pending = (interruptFlags & MCP_RX0IF) != 0;
+    const bool rx1Pending = (interruptFlags & MCP_RX1IF) != 0;
+    if (rx0Pending && rx1Pending) {
+        status |= 0x01;
+    }
+
+    INT8U txCtrl[3] = {0, 0, 0};
+    lw232CAN.getTxCtrlRegisters(&txCtrl[0], &txCtrl[1], &txCtrl[2]);
+    const bool tx0Busy = (txCtrl[0] & MCP_TXB_TXREQ_M) != 0;
+    const bool tx1Busy = (txCtrl[1] & MCP_TXB_TXREQ_M) != 0;
+    const bool tx2Busy = (txCtrl[2] & MCP_TXB_TXREQ_M) != 0;
+    if (tx0Busy && tx1Busy && tx2Busy) {
+        status |= 0x02;
+    }
+
+    INT8U eflg = 0;
+    lw232CAN.checkError(&eflg);
+    if (eflg & MCP_EFLG_EWARN) {
+        status |= 0x04;
+    }
+    if (eflg & (MCP_EFLG_RX0OVR | MCP_EFLG_RX1OVR)) {
+        status |= 0x08;
+    }
+    if (eflg & (MCP_EFLG_TXEP | MCP_EFLG_RXEP)) {
+        status |= 0x20;
+    }
+    if (((txCtrl[0] | txCtrl[1] | txCtrl[2]) & MCP_TXB_MLOA_M) != 0) {
+        status |= 0x40;
+    }
+    if (eflg & MCP_EFLG_TXBO) {
+        status |= 0x80;
+    }
+    return status;
+}
 
 void Can232::parseCanStdId() {
     lw232CanId = (((INT32U)HexHelper::parseNibble(lw232Message[1])) << 8)

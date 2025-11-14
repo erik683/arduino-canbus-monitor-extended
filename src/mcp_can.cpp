@@ -22,7 +22,7 @@
 */
 #include "mcp_can.h"
 
-//#define DEBUG_MODE
+//#define DEBUG_MODE  // Disabled for SavvyCAN LAWICEL compatibility - eliminates MCP2515 diagnostic output
 
 #define spi_readwrite SPI.transfer
 #define spi_read() spi_readwrite(0x00)
@@ -296,6 +296,7 @@ INT8U MCP_CAN::mcp2515_configRate(const INT8U canSpeed, const INT8U clock)
                     cfg3 = MCP_8MHz_31k25BPS_CFG3;
                     break;
 
+                // Additional 8MHz baud rates added for extended compatibility
 		        case (CAN_33KBPS):
         			cfg1 = MCP_8MHz_33kBPS_CFG1;
         			cfg2 = MCP_8MHz_33kBPS_CFG2;
@@ -693,7 +694,7 @@ INT8U MCP_CAN::begin(INT8U speedset, const INT8U clockset)
 *********************************************************************************************************/
 INT8U MCP_CAN::init_Mask(INT8U num, INT8U ext, INT32U ulData)
 {
-    INT8U res = MCP2515_OK;
+    INT8U res = MCP2515_OK;  // Initialize return value for proper error handling
 #if DEBUG_MODE
     Serial.print("Begin to set Mask!!\r\n");
 #else
@@ -988,6 +989,32 @@ INT8U MCP_CAN::readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[])
 }
 
 /*********************************************************************************************************
+** Function name:           getInterruptFlags
+** Descriptions:            expose CANINTF register contents
+*********************************************************************************************************/
+INT8U MCP_CAN::getInterruptFlags(void)
+{
+    return mcp2515_readRegister(MCP_CANINTF);
+}
+
+/*********************************************************************************************************
+** Function name:           getTxCtrlRegisters
+** Descriptions:            expose TXBnCTRL registers to caller
+*********************************************************************************************************/
+void MCP_CAN::getTxCtrlRegisters(INT8U *txb0, INT8U *txb1, INT8U *txb2)
+{
+    if (txb0 != 0) {
+        *txb0 = mcp2515_readRegister(MCP_TXB0CTRL);
+    }
+    if (txb1 != 0) {
+        *txb1 = mcp2515_readRegister(MCP_TXB1CTRL);
+    }
+    if (txb2 != 0) {
+        *txb2 = mcp2515_readRegister(MCP_TXB2CTRL);
+    }
+}
+
+/*********************************************************************************************************
 ** Function name:           checkReceive
 ** Descriptions:            check if got something
 *********************************************************************************************************/
@@ -1067,7 +1094,16 @@ INT8U MCP_CAN::isRemoteRequest(void)
 INT8U MCP_CAN::isExtendedFrame(void)
 {
     return m_nExtFlg;
-} 
+}
+
+/*********************************************************************************************************
+** Function name:           setMode
+** Descriptions:            set CAN controller mode
+*********************************************************************************************************/
+INT8U MCP_CAN::setMode(INT8U mode)
+{
+    return mcp2515_setCANCTRL_Mode(mode);
+}
 
 /*********************************************************************************************************
   END FILE

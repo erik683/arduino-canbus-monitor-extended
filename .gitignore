@@ -2,6 +2,17 @@
 .pio/
 .pioenvs/
 .piolibdeps/
+.pio-home/
+
+# IDE tooling databases
+compile_commands.json
+
+# Tool caches
+.cache/
+
+# Python artifacts
+__pycache__/
+*.pyc
 
 # Build artifacts
 *.o
