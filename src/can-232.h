@@ -32,13 +32,17 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //   Commands not supported/not implemented:
-//     s, W, M, m, U
+//     s - Custom bit-rate via BTR0/BTR1 registers
+//     W - Hardware filter mode (dual/single)
+//     M - Acceptance code register
+//     m - Acceptance mask register
 //      
-//   Commands modified:
-//     S - supports not declared 83.3 rate straight away (S9)     
-//         refer to https://github.com/latonita/CAN_BUS_Shield fork with 83.3 support, easy to add.
-//     F - returns MCP2515 error flags
-//     Z - toggle LAWICEL-compatible 2 byte timestamp (60000ms max)
+//   Commands fully implemented with enhancements:
+//     S - Supports standard bit-rates 0-9, including S9 (83.3 kbps, not in original LAWICEL spec)
+//     U - UART baud rate change (0-6) + query mode (bare 'U' returns current setting)
+//     Z - Timestamp control (Z0/Z1) + query mode (bare 'Z' returns current mode), persists to EEPROM
+//     Q - Auto-start control (Q0/Q1/Q2) + query mode (bare 'Q' returns current mode), persists to EEPROM
+//     F - Returns MCP2515 error flags in LAWICEL-compatible bitmap format
 //
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                                   
@@ -131,7 +135,12 @@
 #define LW232_AUTOSTART_ON_NORMAL      0x01
 #define LW232_AUTOSTART_ON_LISTEN      0x02
 
-#define LW232_EEPROM_ADDR_TIMESTAMP    0x00
+#define LW232_EEPROM_ADDR_MAGIC        0x00
+#define LW232_EEPROM_ADDR_TIMESTAMP    0x01
+#define LW232_EEPROM_ADDR_AUTOSTART    0x10
+#define LW232_AUTOSTART_BLOCK_VERSION  0x01
+#define LW232_AUTOSTART_CHECKSUM_SEED  0x5A
+#define LW232_EEPROM_MAGIC_VALUE       0xA5
 
 #define LW232_TIMESTAMP_OFF            0x00
 #define LW232_TIMESTAMP_ON_NORMAL      0x01
@@ -180,6 +189,7 @@ private:
     bool lw232BitrateConfigured = false;
     INT8U readLawicelStatusFlags();
 
+    INT8U lw232CanSpeedIndex = 0x00;
     INT8U lw232CanSpeedSelection = CAN_83K3BPS;
     INT8U lw232McpModuleClock = MCP_16MHz;
     INT8U lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
@@ -204,8 +214,15 @@ private:
 
     void scheduleSerialBaudChange(INT8U idx);
     void applyPendingSerialBaudChange();
+    void initializeEepromIfNeeded();
     void loadTimestampPreference();
     void persistTimestampPreference();
+    void loadAutoStartPreference();
+    void persistAutoStartPreference();
+    void maybeAutoStart();
+    void persistCanSpeedSelection();
+    static INT8U findCanBaudIndex(INT8U canSpeed);
+    static INT8U computeAutoStartChecksum(INT8U version, INT8U mode, INT8U idx);
 
     INT8U checkReceive();
     INT8U readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[]);

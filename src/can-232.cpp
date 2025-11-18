@@ -15,7 +15,6 @@
 #include <EEPROM.h>
 #include "mcp_can.h"
 #include "can-232.h"
-#include "lcd_diagnostics.h"
 #include "runtime_stats.h"
 
 #ifndef ENABLE_CAN_DEBUG_LOGGING
@@ -65,6 +64,7 @@ void Can232::init(INT8U defaultCanSpeed, const INT8U clock) {
     dbg1("CAN ASCII. Welcome to debug");
 
     instance()->lw232CanSpeedSelection = defaultCanSpeed;
+    instance()->lw232CanSpeedIndex = findCanBaudIndex(defaultCanSpeed);
     instance()->lw232McpModuleClock = clock;
     instance()->lw232BitrateConfigured = false;
     instance()->initFunc();
@@ -86,13 +86,21 @@ void Can232::initFunc() {
     if (!inputString.reserve(LW232_INPUT_STRING_BUFFER_SIZE)) {
         dbg0("inputString.reserve failed in initFunc. less optimal String work is expected");
     }
-    // lw232AutoStart = true; //todo: read from eeprom
-    // lw232AutoPoll = false; //todo: read from eeprom
+
+    // Initialize EEPROM to defaults if not properly set - MUST be first
+    initializeEepromIfNeeded();
+
+    // Now safe to load preferences
     loadTimestampPreference();
+    loadAutoStartPreference();
+
+    // Initialize runtime state
     lw232SerialBaudIndex = 0x01;
     lw232PendingSerialBaudIndex = 0xFF;
     // Channel stays closed until host selects a bitrate (LAWICEL default).
     lw232BitrateConfigured = false;
+
+    maybeAutoStart();
 }
 
 void Can232::setFilterFunc(INT8U (*userFunc)(INT32U)) {
@@ -110,7 +118,7 @@ void Can232::loopFunc() {
         inputString = "";
         stringComplete = false;
     }
-    if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+    if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED && lw232AutoPoll == LW232_AUTOPOLL_ON) {
         int recv = 0;
         while (CAN_MSGAVAIL == checkReceive() && recv++<5) {
             dbg0('+');
@@ -129,6 +137,7 @@ void Can232::serialEventFunc() {
         }
         if (inChar == LW232_CR) {
             stringComplete = true;
+            break;
         }
     }
 }
@@ -179,8 +188,10 @@ INT8U Can232::parseAndRunCommand() {
         }
         else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             idx = HexHelper::parseNibbleWithLimit(lw232Message[1], LW232_CAN_BAUD_NUM);
-			      lw232CanSpeedSelection = lw232CanBaudRates[idx];
+		      lw232CanSpeedIndex = idx;
+		      lw232CanSpeedSelection = lw232CanBaudRates[idx];
             lw232BitrateConfigured = true;
+            persistCanSpeedSelection();
         }
         else {
             ret = LW232_ERR;
@@ -223,7 +234,6 @@ INT8U Can232::parseAndRunCommand() {
         // C[CR] Close the CAN channel.
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
             lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
-            LcdDiagnostics::showCanClosed();
         }
         else {
             ret = LW232_ERR;
@@ -417,27 +427,45 @@ INT8U Can232::parseAndRunCommand() {
         }
         break;
     }
-    case LW232_CMD_AUTOSTART:
-        // Qn[CR] Auto Startup feature (from power on).
-        if (strlen((char*)lw232Message) < 2) {
-            ret = LW232_ERR;
+    case LW232_CMD_AUTOSTART: {
+        // Qn[CR] Auto Startup feature (from power on). Bare Q[CR] reports the current mode.
+        const INT8U modeChar = lw232Message[1];
+        const bool hasArgument = (modeChar != LW232_CR && modeChar != 0);
+        if (!hasArgument) {
+            Serial.print(LW232_CMD_AUTOSTART);
+            INT8U statusChar = LW232_OFF;
+            if (lw232AutoStart == LW232_AUTOSTART_ON_NORMAL) {
+                statusChar = LW232_ON_ONE;
+            } else if (lw232AutoStart == LW232_AUTOSTART_ON_LISTEN) {
+                statusChar = LW232_ON_TWO;
+            }
+            Serial.print((char)statusChar);  // Cast to char explicitly
+            break;
         }
-        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
-            if (lw232Message[1] == LW232_ON_ONE) {
-                lw232AutoStart = LW232_AUTOSTART_ON_NORMAL;
-            }
-            else if (lw232Message[1] == LW232_ON_TWO) {
-                lw232AutoStart = LW232_AUTOSTART_ON_LISTEN;
-            }
-            else {
-                lw232AutoStart = LW232_AUTOSTART_OFF;
-            }
-            //todo: save to eeprom
+        if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+            break;
+        }
+        INT8U newMode;
+        if (modeChar == LW232_ON_ONE) {
+            newMode = LW232_AUTOSTART_ON_NORMAL;
+        }
+        else if (modeChar == LW232_ON_TWO) {
+            newMode = LW232_AUTOSTART_ON_LISTEN;
+        }
+        else if (modeChar == LW232_OFF) {
+            newMode = LW232_AUTOSTART_OFF;
         }
         else {
             ret = LW232_ERR;
+            break;
+        }
+        if (newMode != lw232AutoStart) {
+            lw232AutoStart = newMode;
+            persistAutoStartPreference();
         }
         break;
+    }
     default:
         ret = LW232_ERR_UNKNOWN_CMD;
     }
@@ -503,7 +531,6 @@ INT8U Can232::receiveSingleFrame() {
                 HexHelper::printFullByte(LOW_BYTE(timeMs));
             }
             statsRecordRxFrame();
-            LcdDiagnostics::showFrame(lw232CanId, lw232PacketLen, lw232Buffer, extendedFrame != 0);
         }
     }
     else {
@@ -531,7 +558,6 @@ INT8U Can232::checkPassFilter(INT32U addr) {
 
 INT8U Can232::openCanBus(INT8U mode) {
     INT8U ret = LW232_OK;
-    LcdDiagnostics::showCanAttempt(lw232CanSpeedSelection, lw232McpModuleClock);
     INT8U initStatus = CAN_OK;
 #ifndef _MCP_FAKE_MODE_
     initStatus = lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock);
@@ -542,9 +568,6 @@ INT8U Can232::openCanBus(INT8U mode) {
 #endif
     if (initStatus != CAN_OK) {
         ret = LW232_ERR;
-        LcdDiagnostics::showCanError(lw232CanSpeedSelection, lw232McpModuleClock, initStatus);
-    } else {
-        LcdDiagnostics::showCanReady(lw232CanSpeedSelection, lw232McpModuleClock);
     }
     return ret;
 }
@@ -585,12 +608,95 @@ void Can232::applyPendingSerialBaudChange() {
         return;
     }
     Serial.flush();
-    delay(10);
-    Serial.end();
+    // Use a longer delay to ensure stability
+    delay(50);
+    // Don't call Serial.end() as it may not be reliable
     Serial.begin(lw232SerialBaudRates[lw232PendingSerialBaudIndex]);
+    // Additional delay after begin
+    delay(20);
     lw232SerialBaudIndex = lw232PendingSerialBaudIndex;
     lw232PendingSerialBaudIndex = 0xFF;
-    LcdDiagnostics::showSerialReady(lw232SerialBaudRates[lw232SerialBaudIndex]);
+}
+
+void Can232::initializeEepromIfNeeded() {
+    // Check for new format first (magic marker present)
+    const INT8U magic = EEPROM.read(LW232_EEPROM_ADDR_MAGIC);
+    if (magic == LW232_EEPROM_MAGIC_VALUE) {
+        // EEPROM is in new format - validate autostart block
+        const INT8U version = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART);
+        const INT8U storedMode = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 1);
+        const INT8U storedIndex = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 2);
+        const INT8U checksum = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 3);
+        const INT8U expectedChecksum = computeAutoStartChecksum(version, storedMode, storedIndex);
+
+        // Check if autostart block is corrupted
+        if (version != LW232_AUTOSTART_BLOCK_VERSION ||
+            checksum != expectedChecksum ||
+            storedIndex >= LW232_CAN_BAUD_NUM ||
+            storedMode > LW232_AUTOSTART_ON_LISTEN) {
+
+            // Reinitialize autostart block
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART, LW232_AUTOSTART_BLOCK_VERSION);
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 1, LW232_AUTOSTART_OFF);
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 2, findCanBaudIndex(LW232_DEFAULT_CAN_RATE));
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 3, computeAutoStartChecksum(
+                LW232_AUTOSTART_BLOCK_VERSION,
+                LW232_AUTOSTART_OFF,
+                findCanBaudIndex(LW232_DEFAULT_CAN_RATE)
+            ));
+
+            dbg1("EEPROM autostart block corrupted, reinitialized");
+        }
+    } else {
+        // Check if this is old format (timestamp stored at address 0x00)
+        const INT8U oldTimestamp = EEPROM.read(LW232_EEPROM_ADDR_MAGIC); // Was 0x00 in old format
+        if (oldTimestamp == LW232_TIMESTAMP_OFF || oldTimestamp == LW232_TIMESTAMP_ON_NORMAL) {
+            // Old format detected - migrate to new format
+            dbg1("Migrating EEPROM from old format");
+
+            // Move timestamp from 0x00 to 0x01
+            EEPROM.write(LW232_EEPROM_ADDR_TIMESTAMP, oldTimestamp);
+
+            // Initialize autostart block (wasn't implemented in old version)
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART, LW232_AUTOSTART_BLOCK_VERSION);
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 1, LW232_AUTOSTART_OFF);
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 2, findCanBaudIndex(LW232_DEFAULT_CAN_RATE));
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 3, computeAutoStartChecksum(
+                LW232_AUTOSTART_BLOCK_VERSION,
+                LW232_AUTOSTART_OFF,
+                findCanBaudIndex(LW232_DEFAULT_CAN_RATE)
+            ));
+
+            // Write magic marker to indicate new format
+            EEPROM.write(LW232_EEPROM_ADDR_MAGIC, LW232_EEPROM_MAGIC_VALUE);
+
+            dbg1("EEPROM migration completed");
+        } else {
+            // Neither new format nor old format - initialize to defaults
+            dbg1("EEPROM uninitialized - setting defaults");
+
+            // Write magic marker
+            EEPROM.write(LW232_EEPROM_ADDR_MAGIC, LW232_EEPROM_MAGIC_VALUE);
+
+            // Initialize timestamp setting
+            EEPROM.write(LW232_EEPROM_ADDR_TIMESTAMP, LW232_TIMESTAMP_OFF);
+
+            // Initialize autostart settings with proper structure
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART, LW232_AUTOSTART_BLOCK_VERSION);
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 1, LW232_AUTOSTART_OFF);  // mode
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 2, findCanBaudIndex(LW232_DEFAULT_CAN_RATE));  // speed index
+            EEPROM.write(LW232_EEPROM_ADDR_AUTOSTART + 3, computeAutoStartChecksum(
+                LW232_AUTOSTART_BLOCK_VERSION,
+                LW232_AUTOSTART_OFF,
+                findCanBaudIndex(LW232_DEFAULT_CAN_RATE)
+            ));
+
+            // Initialize current runtime values to match EEPROM
+            lw232TimeStamp = LW232_TIMESTAMP_OFF;
+            lw232AutoStart = LW232_AUTOSTART_OFF;
+            lw232CanSpeedIndex = findCanBaudIndex(LW232_DEFAULT_CAN_RATE);
+        }
+    }
 }
 
 void Can232::loadTimestampPreference() {
@@ -605,6 +711,90 @@ void Can232::loadTimestampPreference() {
 
 void Can232::persistTimestampPreference() {
     EEPROM.update(LW232_EEPROM_ADDR_TIMESTAMP, lw232TimeStamp);
+}
+
+INT8U Can232::findCanBaudIndex(INT8U canSpeed) {
+    for (INT8U idx = 0; idx < LW232_CAN_BAUD_NUM; idx++) {
+        if (lw232CanBaudRates[idx] == canSpeed) {
+            return idx;
+        }
+    }
+    return 0;
+}
+
+INT8U Can232::computeAutoStartChecksum(INT8U version, INT8U mode, INT8U idx) {
+    return version ^ mode ^ idx ^ LW232_AUTOSTART_CHECKSUM_SEED;
+}
+
+void Can232::loadAutoStartPreference() {
+    // Load autostart preferences from EEPROM with robust error handling
+    const INT8U version = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART);
+    const INT8U storedMode = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 1);
+    const INT8U storedIndex = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 2);
+    const INT8U checksum = EEPROM.read(LW232_EEPROM_ADDR_AUTOSTART + 3);
+
+    // Compute expected checksum
+    const INT8U expectedChecksum = computeAutoStartChecksum(version, storedMode, storedIndex);
+
+    // Validate all parameters
+    const bool versionValid = (version == LW232_AUTOSTART_BLOCK_VERSION);
+    const bool checksumValid = (checksum == expectedChecksum);
+    const bool modeValid = (storedMode <= LW232_AUTOSTART_ON_LISTEN);
+    const bool indexValid = (storedIndex < LW232_CAN_BAUD_NUM);
+
+    // Load settings if all validation passes
+    if (versionValid && checksumValid && modeValid && indexValid) {
+        lw232AutoStart = storedMode;
+        lw232CanSpeedIndex = storedIndex;
+        dbg2("Loaded autostart from EEPROM: mode=", storedMode);
+    } else {
+        // Validation failed - use defaults and log issue
+        lw232AutoStart = LW232_AUTOSTART_OFF;
+        lw232CanSpeedIndex = findCanBaudIndex(LW232_DEFAULT_CAN_RATE);
+
+        // Log validation failures for debugging
+        if (!versionValid) {
+            dbg2("EEPROM autostart version invalid: ", version);
+        } else if (!checksumValid) {
+            dbg2("EEPROM autostart checksum invalid: ", checksum);
+            dbg2("Expected: ", expectedChecksum);
+        } else if (!modeValid) {
+            dbg2("EEPROM autostart mode invalid: ", storedMode);
+        } else if (!indexValid) {
+            dbg2("EEPROM autostart index invalid: ", storedIndex);
+        }
+    }
+}
+
+void Can232::persistAutoStartPreference() {
+    const INT8U version = LW232_AUTOSTART_BLOCK_VERSION;
+    EEPROM.update(LW232_EEPROM_ADDR_AUTOSTART, version);
+    EEPROM.update(LW232_EEPROM_ADDR_AUTOSTART + 1, lw232AutoStart);
+    EEPROM.update(LW232_EEPROM_ADDR_AUTOSTART + 2, lw232CanSpeedIndex);
+    EEPROM.update(LW232_EEPROM_ADDR_AUTOSTART + 3, computeAutoStartChecksum(version, lw232AutoStart, lw232CanSpeedIndex));
+}
+
+void Can232::persistCanSpeedSelection() {
+    persistAutoStartPreference();
+}
+
+void Can232::maybeAutoStart() {
+    if (lw232AutoStart == LW232_AUTOSTART_OFF) {
+        return;
+    }
+    if (lw232CanSpeedIndex >= LW232_CAN_BAUD_NUM) {
+        lw232AutoStart = LW232_AUTOSTART_OFF;
+        persistAutoStartPreference();
+        return;
+    }
+    lw232CanSpeedSelection = lw232CanBaudRates[lw232CanSpeedIndex];
+    lw232BitrateConfigured = true;
+    const INT8U requestedMode = (lw232AutoStart == LW232_AUTOSTART_ON_NORMAL) ? MODE_NORMAL : MODE_LISTENONLY;
+    if (openCanBus(requestedMode) == LW232_OK) {
+        lw232CanChannelMode = (requestedMode == MODE_NORMAL) ? LW232_STATUS_CAN_OPEN_NORMAL : LW232_STATUS_CAN_OPEN_LISTEN;
+    } else {
+        lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
+    }
 }
 
 
