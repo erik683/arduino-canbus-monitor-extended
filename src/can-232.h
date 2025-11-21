@@ -25,9 +25,24 @@
 #include "mcp_can_dfs.h"
 #include "SoftwareSerial.h"
 
+#ifndef LW232_RX_BUFFER_SIZE
+// Default to a 64-frame circular buffer on small MCUs (Uno = 2 KB SRAM).
+// Override in platformio.ini (e.g. -DLW232_RX_BUFFER_SIZE=128) on boards
+// with more RAM such as the Mega2560.
+#define LW232_RX_BUFFER_SIZE 64
+#endif
+
+#ifndef LW232_DEFAULT_UART_BAUD_INDEX
+#define LW232_DEFAULT_UART_BAUD_INDEX 0x01
+#endif
+
 #define LW232_LAWICEL_VERSION_STR     "V1013"
-#define LW232_LAWICEL_SERIAL_NUM      "NA123"
+#define LW232_LAWICEL_SERIAL_NUM      "NA666"
 #define LW232_CAN_BUS_SHIELD_CS_PIN   10
+#define LW232_CAN_INT_PIN             2
+
+#define LW232_FRAME_FLAG_EXTENDED     0x01
+#define LW232_FRAME_FLAG_REMOTE       0x02
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -73,7 +88,9 @@
 #define LW232_CMD_VERSION2  'v' //   YES       V[CR]                Get Version number of both CAN232 hardware and software
 #define LW232_CMD_SERIAL    'N' //   YES       N[CR]                Get Serial number of the CAN232.
 #define LW232_CMD_TIMESTAMP 'Z' //   YES       Zn[CR]               Sets Time Stamp ON/OFF for received frames only.
-#define LW232_CMD_AUTOSTART 'Q' //   YES  todo     Qn[CR]               Auto Startup feature (from power on). 
+#define LW232_CMD_AUTOSTART 'Q' //   YES  todo     Qn[CR]               Auto Startup feature (from power on).
+#define LW232_CMD_INFO      'i' //   custom   i[CR]               Report runtime statistics (adapter diagnostics)
+#define LW232_CMD_DEBUG     '@' //   custom   @DBGn[CR]            Runtime debug toggle (0=off, 1=on)
 
 #define LOW_BYTE(x)     ((unsigned char)((x)&0xFF))
 #define HIGH_BYTE(x)    ((unsigned char)(((x)>>8)&0xFF))
@@ -122,7 +139,41 @@
 #define LW232_FRAME_MAX_LENGTH         0x08
 #define LW232_FRAME_MAX_SIZE           (sizeof("Tiiiiiiiildddddddddddddddd\r")+1)
 
-#define LW232_INPUT_STRING_BUFFER_SIZE 200
+#define LW232_INPUT_STRING_BUFFER_SIZE 64
+
+#define LW232_PROTOCOL_LAWICEL         0x00
+#define LW232_PROTOCOL_GVRET           0x01
+
+#ifndef LW232_DEFAULT_PROTOCOL_MODE
+#define LW232_DEFAULT_PROTOCOL_MODE LW232_PROTOCOL_LAWICEL
+#endif
+
+#define GVRET_RET_ACK                  0x00
+#define GVRET_RET_NAK                  0xFF
+#define GVRET_CMD_TX_STD               0x01
+#define GVRET_CMD_TX_EXT               0x02
+#define GVRET_CMD_RX_STD               0x03
+#define GVRET_CMD_RX_EXT               0x04
+#define GVRET_CMD_SET_BITRATE          0x05
+#define GVRET_CMD_OPEN_NORMAL          0x06
+#define GVRET_CMD_CLOSE                0x07
+#define GVRET_CMD_OPEN_LISTEN          0x08
+#define GVRET_CMD_GET_VERSION          0x09
+#define GVRET_CMD_GET_SERIAL           0x0A
+#define GVRET_CMD_SET_DIGITAL_OUT      0x0B
+#define GVRET_CMD_SET_SINGLE_WIRE      0x0C
+#define GVRET_CMD_SET_SILENT_MODE      0x0D
+#define GVRET_CMD_ENABLE_TIMESTAMP     0x0E
+#define GVRET_CMD_DISABLE_TIMESTAMP    0x0F
+#define GVRET_CMD_FLOW_CONTROL         0x10
+#define GVRET_CMD_SET_FILTER           0x11
+#define GVRET_CMD_SET_MASK             0x12
+
+#define GVRET_MAX_PACKET_SIZE          32
+#define GVRET_MAX_FRAMES_PER_LOOP      8
+#define GVRET_START_BYTE               0xF1
+#define GVRET_HANDSHAKE_BYTE           0xE7
+#define GVRET_DEVICE_BUILD_NUM         333
 
 #define LW232_OFF                      '0'
 #define LW232_ON_ONE                   '1'
@@ -155,11 +206,11 @@
 #define LW232_DEFAULT_CLOCK_FREQ       MCP_16MHz
 
 #define LW232_CAN_BAUD_NUM             0x0a
-#define LW232_UART_BAUD_NUM            0x07
+#define LW232_UART_BAUD_NUM            0x08
 
 
 const INT32U lw232SerialBaudRates[] //PROGMEM
-= { 230400, 115200, 57600, 38400, 19200, 9600, 2400 };
+= { 230400, 115200, 57600, 38400, 19200, 9600, 2400, 500000 };
 
 const INT8U lw232CanBaudRates[] //PROGMEM
 = { CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_500KBPS /*CAN_800KBPS*/, CAN_1000KBPS, CAN_83K3BPS };
@@ -171,15 +222,44 @@ public:
     static void setFilter(INT8U (*userFunc)(INT32U));
     static void loop();
     static void serialEvent();
+    static void notifyCanInterrupt();
 
 private:
     static Can232* _instance;
     static Can232* instance();
 
+    struct BufferedFrame {
+        INT32U id;
+        INT16U timestamp;
+        INT8U len;
+        INT8U flags;
+        INT8U data[8];
+    };
+
+#if defined(__AVR__)
+    // Keep the RX queue from consuming more than half of the available SRAM on AVR
+    // boards (prevents silent heap allocation failures on 2 KB parts like the Uno).
+    static_assert(LW232_RX_BUFFER_SIZE * sizeof(BufferedFrame) <= (RAMEND - RAMSTART + 1) / 2,
+                  "LW232_RX_BUFFER_SIZE is too large for this AVR's SRAM budget");
+#endif
+
+    enum RxReadStatus : INT8U {
+        RX_READ_NONE = 0,
+        RX_READ_SKIPPED = 1,
+        RX_READ_READY = 2
+    };
+
     void initFunc();
     void setFilterFunc(INT8U (*userFunc)(INT32U));
     void loopFunc();
     void serialEventFunc();
+    void loopLawicel();
+    void loopGvret();
+    void processGvretSerial();
+    void processGvretByte(INT8U b);
+    bool handleGvretHostFrame();
+    void resetGvretParser();
+    void switchProtocol(INT8U mode);
 
     INT8U (*userAddressFilterFunc)(INT32U addr) = 0;
 
@@ -198,6 +278,7 @@ private:
     INT8U lw232AutoStart = LW232_AUTOSTART_OFF;
     INT8U lw232AutoPoll  = LW232_AUTOPOLL_OFF;
     INT8U lw232TimeStamp = LW232_TIMESTAMP_OFF;
+    bool lw232DebugMode = false;
 
     INT32U lw232CanId = 0;
 
@@ -206,8 +287,42 @@ private:
 
     INT8U lw232Message[LW232_FRAME_MAX_SIZE];
 
+    BufferedFrame rxBuffer[LW232_RX_BUFFER_SIZE];
+    volatile INT16U rxHead = 0;
+    volatile INT16U rxTail = 0;
+    volatile INT16U rxCount = 0;
+
+    // Bus load monitoring
+    unsigned long lastBusLoadCalc = 0;
+    unsigned long lastBusLoadFrameCount = 0;
+
     String inputString = "";         // a string to hold incoming data
     boolean stringComplete = false;  // whether the string is complete
+    volatile bool mcpInterruptPending = false;
+    INT8U protocolMode = LW232_DEFAULT_PROTOCOL_MODE;
+    bool gvretTimestampsEnabled = true;
+    bool gvretSilentMode = false;
+    INT8U gvretBuffer[GVRET_MAX_PACKET_SIZE];
+    INT8U gvretBufferLen = 0;
+    INT8U gvretHandshakeCount = 0;
+    INT32U gvretCan0Baud = 500000; // default for reporting
+    bool gvretCan0Enabled = false;
+    bool gvretCan0ListenOnly = false;
+
+    enum class GvretRxState : INT8U {
+        WAIT_START,
+        GET_COMMAND,
+        BUILD_CAN_FRAME,
+        GET_SETUP_BYTES,
+        IGNORE_COMMAND
+    };
+    GvretRxState gvretRxState = GvretRxState::WAIT_START;
+    INT8U gvretRxStep = 0;
+    INT8U gvretCurrentCmd = 0;
+    INT32U gvretHostFrameId = 0;
+    INT8U gvretHostBus = 0;
+    INT8U gvretHostLen = 0;
+    INT8U gvretHostData[GVRET_MAX_PACKET_SIZE];
 
     INT8U parseAndRunCommand();
     INT8U exec();
@@ -222,19 +337,42 @@ private:
     void maybeAutoStart();
     void persistCanSpeedSelection();
     static INT8U findCanBaudIndex(INT8U canSpeed);
+    static INT8U findCanBaudIndexByBps(INT32U bps);
     static INT8U computeAutoStartChecksum(INT8U version, INT8U mode, INT8U idx);
 
     INT8U checkReceive();
     INT8U readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[]);
     INT8U receiveSingleFrame();
+    void emitFrameToSerial(const BufferedFrame& frame);
+    void emitFrameToGvret(const BufferedFrame& frame);
+    void emitGvretBusParams();
+    void emitGvretDeviceInfo();
+    void emitGvretNumBuses();
+    void emitGvretExtBuses();
+    void emitGvretValidation();
+    void emitGvretTimeSync();
+    void serviceCanRx();
+    RxReadStatus readCanFrame(BufferedFrame& frame);
+    bool consumeInterruptFlag();
+    bool rxBufferEmpty() const;
+    void clearRxBuffer();
+    bool pushRxFrame(const BufferedFrame& frame);
+    bool popRxFrame(BufferedFrame& frame);
+
     INT8U isExtendedFrame();
     INT8U checkPassFilter(INT32U addr);
     INT8U openCanBus(INT8U mode = MODE_NORMAL);
     
     INT8U sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf);
 
-    void  parseCanStdId();
-    void  parseCanExtId();
+    bool  parseCanStdId();
+    bool  parseCanExtId();
+
+    void updateBusLoad();
+    void sendGvretAck();
+    void sendGvretNak();
+    void sendGvretStringResponse(INT8U cmd, const char* str);
+    void emitGvretRxFrames();
 };
 
 class HexHelper {
@@ -243,8 +381,11 @@ public:
     static void printNibble(INT8U b);
 
     static INT8U parseNibble(INT8U hex);
-    static INT8U parseFullByte(INT8U H, INT8U L);
+    static INT8U parseFullByte(INT8U H, INT8U L, bool *ok = nullptr);
     static INT8U parseNibbleWithLimit(INT8U hex, INT8U limit);
+
+    static char toHexChar(INT8U nibble);
+    static void byteToHex(INT8U value, char *out);
 };
 
 class Can232Fake : Can232 {

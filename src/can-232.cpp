@@ -1,5 +1,6 @@
 /*****************************************************************************************
  * This is implementation of CAN BUS ASCII protocol based on LAWICEL v1.3 serial protocol
+ 
  *  of CAN232/CANUSB device (http://www.can232.com/docs/can232_v3.pdf)
  *
 * Made for Arduino with Seeduino/ElecFreaks CAN BUS Shield based on MCP2515
@@ -13,6 +14,7 @@
 
 #include <SPI.h>
 #include <EEPROM.h>
+#include <avr/pgmspace.h>
 #include "mcp_can.h"
 #include "can-232.h"
 #include "runtime_stats.h"
@@ -27,19 +29,51 @@
 
 #ifdef LOGGING_ENABLED
 #define dbg_begin(x) debug.begin(x)
-#define dbg0(x)   debug.print(x)
-#define dbg1(x)   debug.println(x)
-#define dbg2(x,y) debug.print(x); debug.println(y)
-#define dbgH(x)   debug.print(x,HEX)
+#define dbg0(x)   if (instance() && instance()->lw232DebugMode) debug.print(x)
+#define dbg1(x)   if (instance() && instance()->lw232DebugMode) debug.println(x)
+#define dbg2(x,y) if (instance() && instance()->lw232DebugMode) { debug.print(x); debug.println(y); }
+#define dbgH(x)   if (instance() && instance()->lw232DebugMode) debug.print(x,HEX)
 #define DEBUG_RX_PIN 8
 #define DEBUG_TX_PIN 9
 #else
 #define dbg_begin(x)
-#define dbg0(x) 
-#define dbg1(x) 
+#define dbg0(x)
+#define dbg1(x)
 #define dbg2(x,y)
 #define dbgH(x)
 #endif
+
+#define HEX_INVALID 0xFF
+
+static const INT8U HEX_LOOKUP_TABLE[256] PROGMEM = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x00-0x0F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x10-0x1F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x20-0x2F
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x30-0x3F
+    0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x40-0x4F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x50-0x5F
+    0xFF, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x60-0x6F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x70-0x7F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x80-0x8F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0x90-0x9F
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0xA0-0xAF
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0xB0-0xBF
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0xC0-0xCF
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0xD0-0xDF
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 0xE0-0xEF
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF  // 0xF0-0xFF
+};
+
+static inline INT8U readHexLookup(INT8U c) {
+    return pgm_read_byte(&HEX_LOOKUP_TABLE[c]);
+}
+
+static inline void emitHex16(unsigned long value) {
+    HexHelper::printFullByte((value >> 8) & 0xFF);
+    HexHelper::printFullByte(value & 0xFF);
+}
+
+static INT32U baudIndexToBps(INT8U idx);
 
 #ifdef LOGGING_ENABLED
     // software serial #2: TX = digital pin 8, RX = digital pin 9
@@ -87,6 +121,19 @@ void Can232::initFunc() {
         dbg0("inputString.reserve failed in initFunc. less optimal String work is expected");
     }
 
+    protocolMode = LW232_DEFAULT_PROTOCOL_MODE;
+    gvretBufferLen = 0;
+    gvretTimestampsEnabled = true;
+    gvretSilentMode = false;
+    gvretHandshakeCount = 0;
+    gvretRxState = GvretRxState::WAIT_START;
+    gvretRxStep = 0;
+    gvretCurrentCmd = 0;
+    gvretHostFrameId = 0;
+    gvretHostBus = 0;
+    gvretHostLen = 0;
+    gvretCan0Baud = baudIndexToBps(lw232CanSpeedIndex);
+
     // Initialize EEPROM to defaults if not properly set - MUST be first
     initializeEepromIfNeeded();
 
@@ -95,11 +142,12 @@ void Can232::initFunc() {
     loadAutoStartPreference();
 
     // Initialize runtime state
-    lw232SerialBaudIndex = 0x01;
+    lw232SerialBaudIndex = LW232_DEFAULT_UART_BAUD_INDEX;
     lw232PendingSerialBaudIndex = 0xFF;
     // Channel stays closed until host selects a bitrate (LAWICEL default).
     lw232BitrateConfigured = false;
 
+    clearRxBuffer();
     maybeAutoStart();
 }
 
@@ -108,6 +156,14 @@ void Can232::setFilterFunc(INT8U (*userFunc)(INT32U)) {
 }
 
 void Can232::loopFunc() {
+    if (protocolMode == LW232_PROTOCOL_GVRET) {
+        loopGvret();
+        return;
+    }
+    loopLawicel();
+}
+
+void Can232::loopLawicel() {
     if (stringComplete) {
         size_t len = inputString.length();
         if (len > 0 && len < LW232_FRAME_MAX_SIZE) {
@@ -118,20 +174,241 @@ void Can232::loopFunc() {
         inputString = "";
         stringComplete = false;
     }
+    bool servicedByInterrupt = false;
+    if (consumeInterruptFlag()) {
+        serviceCanRx();
+        servicedByInterrupt = true;
+    }
+    if (!servicedByInterrupt) {
+        serviceCanRx();
+    }
     if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED && lw232AutoPoll == LW232_AUTOPOLL_ON) {
         int recv = 0;
-        while (CAN_MSGAVAIL == checkReceive() && recv++<5) {
-            dbg0('+');
+        while (recv++ < 5) {
             if (CAN_OK == receiveSingleFrame()) {
+                dbg0('+');
                 Serial.write(LW232_CR);
+            }
+            else {
+                break;
             }
         }
         Serial.flush();
     }
+
+    // Update bus load metrics when CAN is active
+    if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+        updateBusLoad();
+    }
 }
+void Can232::loopGvret() {
+    processGvretSerial();
+
+    bool servicedByInterrupt = false;
+    if (consumeInterruptFlag()) {
+        serviceCanRx();
+        servicedByInterrupt = true;
+    }
+    if (!servicedByInterrupt) {
+        serviceCanRx();
+    }
+    emitGvretRxFrames();
+
+    if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+        updateBusLoad();
+    }
+}
+void Can232::processGvretSerial() {
+    while (Serial.available()) {
+        const INT8U b = (INT8U)Serial.read();
+        processGvretByte(b);
+    }
+}
+
+bool Can232::handleGvretHostFrame() {
+    if (lw232CanChannelMode != LW232_STATUS_CAN_OPEN_NORMAL) {
+        return false;
+    }
+    if (gvretHostBus != 0) {
+        return false;
+    }
+    const bool isExtended = (gvretHostFrameId & (1UL << 31)) != 0;
+    const INT32U id = isExtended ? (gvretHostFrameId & 0x1FFFFFFF) : (gvretHostFrameId & 0x7FF);
+    const INT8U status = sendMsgBuf(id, isExtended ? 1 : 0, 0, gvretHostLen, gvretHostData);
+    return status == CAN_OK;
+}
+
+void Can232::processGvretByte(INT8U b) {
+    switch (gvretRxState) {
+    case GvretRxState::WAIT_START:
+        if (b == GVRET_HANDSHAKE_BYTE) {
+            gvretHandshakeCount++;
+            if (gvretHandshakeCount >= 2) {
+                switchProtocol(LW232_PROTOCOL_GVRET);
+            }
+            return;
+        }
+        gvretHandshakeCount = 0;
+        if (b == GVRET_START_BYTE) {
+            gvretRxState = GvretRxState::GET_COMMAND;
+        }
+        break;
+    case GvretRxState::GET_COMMAND:
+        gvretCurrentCmd = b;
+        gvretRxStep = 0;
+        gvretBufferLen = 0;
+        switch (gvretCurrentCmd) {
+        case 0x00: // SavvyCAN transmit frame command
+            gvretRxState = GvretRxState::BUILD_CAN_FRAME;
+            gvretHostFrameId = 0;
+            gvretHostLen = 0;
+            gvretHostBus = 0;
+            break;
+        case 0x05: // setup CAN bus (two 32-bit words + terminator)
+            gvretRxState = GvretRxState::GET_SETUP_BYTES;
+            break;
+        case 0x06: // request canbus params
+            emitGvretBusParams();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        case 0x07: // device info
+            emitGvretDeviceInfo();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        case 0x09: // validation ping
+            emitGvretValidation();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        case 0x0C: // number of buses
+            emitGvretNumBuses();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        case 0x0D: // extended buses info
+            emitGvretExtBuses();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        case 0x01: // time sync request
+            emitGvretTimeSync();
+            gvretRxState = GvretRxState::WAIT_START;
+            break;
+        default:
+            gvretRxState = GvretRxState::IGNORE_COMMAND;
+            break;
+        }
+        break;
+    case GvretRxState::BUILD_CAN_FRAME:
+        // Host-originated CAN frame (command 0)
+        if (gvretRxStep < 4) {
+            gvretHostFrameId |= ((INT32U)b << (gvretRxStep * 8));
+        } else if (gvretRxStep == 4) {
+            gvretHostBus = b & 0x0F;
+        } else if (gvretRxStep == 5) {
+            gvretHostLen = b & 0x0F;
+            if (gvretHostLen > LW232_FRAME_MAX_LENGTH) {
+                gvretRxState = GvretRxState::WAIT_START;
+                gvretHostFrameId = 0;
+                gvretHostLen = 0;
+                break;
+            }
+        } else {
+            INT8U dataIdx = gvretRxStep - 6;
+            if (dataIdx < GVRET_MAX_PACKET_SIZE) {
+                gvretHostData[dataIdx] = b;
+            }
+            if (dataIdx + 1 >= gvretHostLen) {
+                // Optional terminator byte may follow; accept one extra
+                handleGvretHostFrame();
+                gvretHostFrameId = 0;
+                gvretHostLen = 0;
+                gvretRxState = GvretRxState::WAIT_START;
+            }
+        }
+        gvretRxStep++;
+        break;
+    case GvretRxState::GET_SETUP_BYTES:
+        // Expect two 32-bit baud descriptors plus a padding byte
+        if (gvretRxStep < GVRET_MAX_PACKET_SIZE) {
+            gvretBuffer[gvretRxStep] = b;
+        }
+        gvretRxStep++;
+        if (gvretRxStep >= 9) {
+            INT32U can0Descriptor = ((INT32U)gvretBuffer[0]) |
+                                    ((INT32U)gvretBuffer[1] << 8) |
+                                    ((INT32U)gvretBuffer[2] << 16) |
+                                    ((INT32U)gvretBuffer[3] << 24);
+            const bool requestListenOnly = (can0Descriptor & 0x20000000UL) != 0;
+            const bool requestEnabled = (can0Descriptor & 0x40000000UL) != 0;
+            const INT32U requestedBps = can0Descriptor & 0x1FFFFFFFUL;
+
+            const INT8U newIdx = findCanBaudIndexByBps(requestedBps);
+            if (newIdx != 0xFF) {
+                lw232CanSpeedIndex = newIdx;
+                lw232CanSpeedSelection = lw232CanBaudRates[newIdx];
+                lw232BitrateConfigured = true;
+                persistCanSpeedSelection();
+                gvretCan0Baud = requestedBps;
+            }
+            gvretCan0ListenOnly = requestListenOnly;
+            gvretCan0Enabled = requestEnabled;
+            if (requestEnabled && lw232BitrateConfigured) {
+                INT8U mode = requestListenOnly ? MODE_LISTENONLY : MODE_NORMAL;
+                if (openCanBus(mode) == LW232_OK) {
+                    lw232CanChannelMode = requestListenOnly ? LW232_STATUS_CAN_OPEN_LISTEN : LW232_STATUS_CAN_OPEN_NORMAL;
+                }
+            } else {
+                lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
+                clearRxBuffer();
+            }
+            gvretRxState = GvretRxState::WAIT_START;
+        }
+        break;
+    case GvretRxState::IGNORE_COMMAND:
+        gvretRxState = GvretRxState::WAIT_START;
+        break;
+    }
+}
+
+void Can232::resetGvretParser() {
+    gvretBufferLen = 0;
+}
+
+void Can232::switchProtocol(INT8U mode) {
+    if (mode != LW232_PROTOCOL_LAWICEL && mode != LW232_PROTOCOL_GVRET) {
+        return;
+    }
+    protocolMode = mode;
+    resetGvretParser();
+    stringComplete = false;
+    inputString = "";
+    if (protocolMode == LW232_PROTOCOL_GVRET) {
+        gvretTimestampsEnabled = true;
+        gvretHandshakeCount = 0;
+        gvretRxState = GvretRxState::WAIT_START;
+        gvretRxStep = 0;
+        gvretHostFrameId = 0;
+        gvretHostLen = 0;
+    }
+}
+
 void Can232::serialEventFunc() {
+    if (protocolMode == LW232_PROTOCOL_GVRET) {
+        return;
+    }
     while (Serial.available()) {
         char inChar = (char)Serial.read();
+        if (inChar == '\n') {
+            // Hosts often send CRLF; ignore the line-feed so commands don't get prefixed with '\n'
+            continue;
+        }
+        if ((INT8U)inChar == GVRET_HANDSHAKE_BYTE) {
+            gvretHandshakeCount++;
+            if (gvretHandshakeCount >= 2) {
+                switchProtocol(LW232_PROTOCOL_GVRET);
+                return;
+            }
+        } else {
+            gvretHandshakeCount = 0;
+        }
         if (inputString.length() < LW232_INPUT_STRING_BUFFER_SIZE - 1) {
             inputString += inChar;
         }
@@ -140,6 +417,10 @@ void Can232::serialEventFunc() {
             break;
         }
     }
+}
+
+void Can232::notifyCanInterrupt() {
+    instance()->mcpInterruptPending = true;
 }
 
 INT8U Can232::exec() {
@@ -159,11 +440,17 @@ INT8U Can232::exec() {
         Serial.write(LW232_RET_ASCII_OK);
         break;
     case LW232_ERR_NOT_IMPLEMENTED:
+        dbg2("Command not implemented:", lw232Message[0]);
         // Choose behavior: will it fail or not when not implemented command comes in. Some can monitors might be affected by this selection.
         Serial.write(LW232_RET_ASCII_ERROR);
-        //Serial.write(LW232_RET_ASCII_OK); 
+        //Serial.write(LW232_RET_ASCII_OK);
+        break;
+    case LW232_ERR_UNKNOWN_CMD:
+        dbg2("Unknown command:", lw232Message[0]);
+        Serial.write(LW232_RET_ASCII_ERROR);
         break;
     default:
+        dbg2("Command error:", lw232LastErr);
         Serial.write(LW232_RET_ASCII_ERROR);
     }
     applyPendingSerialBaudChange();
@@ -175,23 +462,32 @@ INT8U Can232::parseAndRunCommand() {
     INT8U idx = 0;
     lw232LastErr = LW232_OK;
 
-    // Check minimum message length
-    if (strlen((char*)lw232Message) < 1) {
+    const size_t msgLen = strlen((char*)lw232Message);
+    if (msgLen < 1) {
         return LW232_ERR;
     }
+    if (lw232Message[msgLen - 1] != LW232_CR) {
+        return LW232_ERR;
+    }
+    const size_t payloadLen = msgLen - 1;
 
     switch (lw232Message[0]) {
         case LW232_CMD_SETUP:
         // Sn[CR] Setup with standard CAN bit-rates where n is 0-9.
-        if (strlen((char*)lw232Message) < 2) {
+        if (payloadLen < 2) {
             ret = LW232_ERR;
         }
         else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             idx = HexHelper::parseNibbleWithLimit(lw232Message[1], LW232_CAN_BAUD_NUM);
-		      lw232CanSpeedIndex = idx;
-		      lw232CanSpeedSelection = lw232CanBaudRates[idx];
-            lw232BitrateConfigured = true;
-            persistCanSpeedSelection();
+            if (idx == HEX_INVALID) {
+                ret = LW232_ERR;
+            } else {
+                lw232CanSpeedIndex = idx;
+                lw232CanSpeedSelection = lw232CanBaudRates[idx];
+                gvretCan0Baud = baudIndexToBps(idx);
+                lw232BitrateConfigured = true;
+                persistCanSpeedSelection();
+            }
         }
         else {
             ret = LW232_ERR;
@@ -209,6 +505,8 @@ INT8U Can232::parseAndRunCommand() {
             ret = openCanBus(MODE_NORMAL);
             if (ret == LW232_OK) {
               lw232CanChannelMode = LW232_STATUS_CAN_OPEN_NORMAL;
+              gvretCan0Enabled = true;
+              gvretCan0ListenOnly = false;
             }
         }
         else {
@@ -224,6 +522,8 @@ INT8U Can232::parseAndRunCommand() {
             ret = openCanBus(MODE_LISTENONLY);
             if (ret == LW232_OK) {
               lw232CanChannelMode = LW232_STATUS_CAN_OPEN_LISTEN;
+              gvretCan0Enabled = true;
+              gvretCan0ListenOnly = true;
             }
         }
         else {
@@ -234,6 +534,8 @@ INT8U Can232::parseAndRunCommand() {
         // C[CR] Close the CAN channel.
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
             lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
+            clearRxBuffer();
+            gvretCan0Enabled = false;
         }
         else {
             ret = LW232_ERR;
@@ -242,17 +544,50 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_TX11:
         // tiiildd...[CR] Transmit a standard (11bit) CAN frame.
         if (lw232CanChannelMode == LW232_STATUS_CAN_OPEN_NORMAL) {
-            parseCanStdId();
-            lw232PacketLen = HexHelper::parseNibbleWithLimit(lw232Message[LW232_OFFSET_STD_PKT_LEN], LW232_FRAME_MAX_LENGTH + 1);
-            for (; idx < lw232PacketLen; idx++) {
-                lw232Buffer[idx] = HexHelper::parseFullByte(lw232Message[LW232_OFFSET_STD_PKT_DATA + idx * 2], lw232Message[LW232_OFFSET_STD_PKT_DATA + idx * 2 + 1]);
+            if (payloadLen <= LW232_OFFSET_STD_PKT_LEN) {
+                ret = LW232_ERR;
+                break;
+            }
+            if (!parseCanStdId()) {
+                ret = LW232_ERR;
+                break;
+            }
+            lw232PacketLen = HexHelper::parseNibbleWithLimit(
+                lw232Message[LW232_OFFSET_STD_PKT_LEN],
+                LW232_FRAME_MAX_LENGTH + 1
+            );
+            if (lw232PacketLen == HEX_INVALID) {
+                ret = LW232_ERR;
+                break;
+            }
+            const size_t requiredPayload = LW232_OFFSET_STD_PKT_DATA + (size_t)lw232PacketLen * 2;
+            if (payloadLen != requiredPayload) {
+                ret = LW232_ERR;
+                break;
+            }
+            bool dataOk = true;
+            for (INT8U dataIdx = 0; dataIdx < lw232PacketLen; dataIdx++) {
+                bool parsed = false;
+                lw232Buffer[dataIdx] = HexHelper::parseFullByte(
+                    lw232Message[LW232_OFFSET_STD_PKT_DATA + dataIdx * 2],
+                    lw232Message[LW232_OFFSET_STD_PKT_DATA + dataIdx * 2 + 1],
+                    &parsed
+                );
+                if (!parsed) {
+                    dataOk = false;
+                    break;
+                }
+            }
+            if (!dataOk) {
+                ret = LW232_ERR;
+                break;
             }
             INT8U mcpErr = sendMsgBuf(lw232CanId, 0, 0, lw232PacketLen, lw232Buffer);
             if (mcpErr != CAN_OK) {
                 ret = LW232_ERR;
             } else if (lw232AutoPoll) {
                 ret = LW232_OK_SMALL;
-            } 
+            }
         }
         else {
             ret = LW232_ERR;
@@ -261,10 +596,43 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_TX29:
         // Tiiiiiiiildd...[CR] Transmit an extended (29bit) CAN frame
         if (lw232CanChannelMode == LW232_STATUS_CAN_OPEN_NORMAL) {
-            parseCanExtId();
-            lw232PacketLen = HexHelper::parseNibbleWithLimit(lw232Message[LW232_OFFSET_EXT_PKT_LEN], LW232_FRAME_MAX_LENGTH + 1);
-            for (; idx < lw232PacketLen; idx++) {
-                lw232Buffer[idx] = HexHelper::parseFullByte(lw232Message[LW232_OFFSET_EXT_PKT_DATA + idx * 2], lw232Message[LW232_OFFSET_EXT_PKT_DATA + idx * 2 + 1]);
+            if (payloadLen <= LW232_OFFSET_EXT_PKT_LEN) {
+                ret = LW232_ERR;
+                break;
+            }
+            if (!parseCanExtId()) {
+                ret = LW232_ERR;
+                break;
+            }
+            lw232PacketLen = HexHelper::parseNibbleWithLimit(
+                lw232Message[LW232_OFFSET_EXT_PKT_LEN],
+                LW232_FRAME_MAX_LENGTH + 1
+            );
+            if (lw232PacketLen == HEX_INVALID) {
+                ret = LW232_ERR;
+                break;
+            }
+            const size_t requiredPayload = LW232_OFFSET_EXT_PKT_DATA + (size_t)lw232PacketLen * 2;
+            if (payloadLen != requiredPayload) {
+                ret = LW232_ERR;
+                break;
+            }
+            bool dataOk = true;
+            for (INT8U dataIdx = 0; dataIdx < lw232PacketLen; dataIdx++) {
+                bool parsed = false;
+                lw232Buffer[dataIdx] = HexHelper::parseFullByte(
+                    lw232Message[LW232_OFFSET_EXT_PKT_DATA + dataIdx * 2],
+                    lw232Message[LW232_OFFSET_EXT_PKT_DATA + dataIdx * 2 + 1],
+                    &parsed
+                );
+                if (!parsed) {
+                    dataOk = false;
+                    break;
+                }
+            }
+            if (!dataOk) {
+                ret = LW232_ERR;
+                break;
             }
             if (CAN_OK != sendMsgBuf(lw232CanId, 1, 0, lw232PacketLen, lw232Buffer)) {
                 ret = LW232_ERR;
@@ -281,8 +649,22 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_RTR11:
         // riiil[CR] Transmit an standard RTR (11bit) CAN frame.
         if (lw232CanChannelMode == LW232_STATUS_CAN_OPEN_NORMAL) {
-            parseCanStdId();
-            lw232PacketLen = HexHelper::parseNibbleWithLimit(lw232Message[LW232_OFFSET_STD_PKT_LEN], LW232_FRAME_MAX_LENGTH + 1);
+            if (payloadLen <= LW232_OFFSET_STD_PKT_LEN) {
+                ret = LW232_ERR;
+                break;
+            }
+            if (!parseCanStdId()) {
+                ret = LW232_ERR;
+                break;
+            }
+            lw232PacketLen = HexHelper::parseNibbleWithLimit(
+                lw232Message[LW232_OFFSET_STD_PKT_LEN],
+                LW232_FRAME_MAX_LENGTH + 1
+            );
+            if (lw232PacketLen == HEX_INVALID || payloadLen != LW232_OFFSET_STD_PKT_DATA) {
+                ret = LW232_ERR;
+                break;
+            }
             if (CAN_OK != sendMsgBuf(lw232CanId, 0, 1, lw232PacketLen, lw232Buffer)) {
                 ret = LW232_ERR;
             }
@@ -297,8 +679,22 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_RTR29:
         // Riiiiiiiil[CR] Transmit an extended RTR (29bit) CAN frame.
         if (lw232CanChannelMode == LW232_STATUS_CAN_OPEN_NORMAL) {
-            parseCanExtId();
-            lw232PacketLen = HexHelper::parseNibbleWithLimit(lw232Message[LW232_OFFSET_EXT_PKT_LEN], LW232_FRAME_MAX_LENGTH + 1);
+            if (payloadLen <= LW232_OFFSET_EXT_PKT_LEN) {
+                ret = LW232_ERR;
+                break;
+            }
+            if (!parseCanExtId()) {
+                ret = LW232_ERR;
+                break;
+            }
+            lw232PacketLen = HexHelper::parseNibbleWithLimit(
+                lw232Message[LW232_OFFSET_EXT_PKT_LEN],
+                LW232_FRAME_MAX_LENGTH + 1
+            );
+            if (lw232PacketLen == HEX_INVALID || payloadLen != LW232_OFFSET_EXT_PKT_DATA) {
+                ret = LW232_ERR;
+                break;
+            }
             if (CAN_OK != sendMsgBuf(lw232CanId, 1, 1, lw232PacketLen, lw232Buffer)) {
                 ret = LW232_ERR;
             }
@@ -312,8 +708,11 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_POLL_ONE:
         // P[CR] Poll incomming FIFO for CAN frames (single poll)
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED && lw232AutoPoll == LW232_AUTOPOLL_OFF) {
-            if (CAN_MSGAVAIL == checkReceive()) {
+            serviceCanRx();
+            if (!rxBufferEmpty()) {
                 ret = receiveSingleFrame();
+            } else {
+                ret = LW232_ERR;
             }
         } else {
             ret = LW232_ERR;
@@ -322,7 +721,8 @@ INT8U Can232::parseAndRunCommand() {
     case LW232_CMD_POLL_MANY:
         // A[CR] Polls incomming FIFO for CAN frames (all pending frames)
         if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED && lw232AutoPoll == LW232_AUTOPOLL_OFF) {
-            while (CAN_MSGAVAIL == checkReceive()) {
+            serviceCanRx();
+            while (!rxBufferEmpty()) {
                 INT8U frameRet = receiveSingleFrame();
                 if (frameRet != LW232_OK) {
                     ret = frameRet;
@@ -345,18 +745,23 @@ INT8U Can232::parseAndRunCommand() {
             HexHelper::printFullByte(readLawicelStatusFlags());
         }
         break;
-    case LW232_CMD_AUTOPOLL:
-        // Xn[CR] Sets Auto Poll/Send ON/OFF for received frames.
-        if (strlen((char*)lw232Message) < 2) {
-            ret = LW232_ERR;
+    case LW232_CMD_AUTOPOLL: {
+        // Xn[CR] Sets Auto Poll/Send ON/OFF for received frames. Bare X[CR] reports the current mode.
+        const INT8U autopollChar = lw232Message[1];
+        const bool hasArgument = (autopollChar != LW232_CR && autopollChar != 0);
+        if (!hasArgument) {
+            Serial.print(LW232_CMD_AUTOPOLL);
+            Serial.print(lw232AutoPoll == LW232_AUTOPOLL_ON ? LW232_ON_ONE : LW232_OFF);
+            break;
         }
-        else if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
-            lw232AutoPoll = (lw232Message[1] == LW232_ON_ONE) ? LW232_AUTOPOLL_ON : LW232_AUTOPOLL_OFF;
-            //todo: save to eeprom
+        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+            lw232AutoPoll = (autopollChar == LW232_ON_ONE) ? LW232_AUTOPOLL_ON : LW232_AUTOPOLL_OFF;
+            // TODO: save to EEPROM
         } else {
             ret = LW232_ERR;
         }
         break;
+    }
     case LW232_CMD_FILTER:
         // Wn[CR] Filter mode setting. By default CAN232 works in dual filter mode (0) and is backwards compatible with previous CAN232 versions.
         ret = LW232_ERR_NOT_IMPLEMENTED; break;
@@ -367,7 +772,7 @@ INT8U Can232::parseAndRunCommand() {
         // mxxxxxxxx[CR] Sets Acceptance Mask Register (AMn Register of SJA1000).
         ret = LW232_ERR_NOT_IMPLEMENTED; break;
     case LW232_CMD_UART: {
-        // Un[CR] Setup UART with a new baud rate where n is 0-6. Bare U[CR] reports the current selection.
+        // Un[CR] Setup UART with a new baud rate where n is 0-7. Bare U[CR] reports the current selection.
         const INT8U modeChar = lw232Message[1];
         if (modeChar == LW232_CR || modeChar == 0) {
             Serial.print(LW232_CMD_UART);
@@ -466,6 +871,45 @@ INT8U Can232::parseAndRunCommand() {
         }
         break;
     }
+    case LW232_CMD_INFO: {
+        if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+            break;
+        }
+        Serial.print(LW232_CMD_INFO);
+        emitHex16(g_canStats.commandCount);
+        emitHex16(g_canStats.framesRx);
+        emitHex16(g_canStats.framesTx);
+        emitHex16(millis() / 1000UL);
+        emitHex16(g_canStats.rxBufferDrops);
+        emitHex16(g_canStats.rxBufferOverflows);
+        HexHelper::printFullByte((INT8U)(g_canStats.currentFramesPerSecond & 0xFF));
+        // Include debug mode status in diagnostic output
+        Serial.print(lw232DebugMode ? "D" : "d");
+        break;
+    }
+    case LW232_CMD_DEBUG: {
+        if (payloadLen >= 6 && strncmp((char*)lw232Message, "@GVRET", 6) == 0) {
+            switchProtocol(LW232_PROTOCOL_GVRET);
+            Serial.print("GVRET");
+            break;
+        }
+        // @DBGn[CR] Runtime debug toggle (0=off, 1=on)
+        if (payloadLen >= 4 && lw232Message[1] == 'D' && lw232Message[2] == 'B' && lw232Message[3] == 'G') {
+            if (lw232Message[4] == '0') {
+                lw232DebugMode = false;
+                Serial.print("DEBUG OFF\r");
+            } else if (lw232Message[4] == '1') {
+                lw232DebugMode = true;
+                Serial.print("DEBUG ON\r");
+            } else {
+                ret = LW232_ERR;
+            }
+        } else {
+            ret = LW232_ERR;
+        }
+        break;
+    }
     default:
         ret = LW232_ERR_UNKNOWN_CMD;
     }
@@ -498,45 +942,270 @@ INT8U Can232::readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[]) {
 
 
 INT8U Can232::receiveSingleFrame() {
-    INT8U ret = LW232_OK;
-    INT8U idx = 0;
-    if (CAN_OK == readMsgBufID(&lw232CanId, &lw232PacketLen, lw232Buffer)) {
-        if (lw232CanId > 0x1FFFFFFF) {
-            ret = LW232_ERR; // address if totally wrong
+    BufferedFrame frame;
+    serviceCanRx();
+    if (!popRxFrame(frame)) {
+        return LW232_ERR;
+    }
+    emitFrameToSerial(frame);
+    statsRecordRxFrame();
+    return LW232_OK;
+}
+
+void Can232::emitFrameToSerial(const BufferedFrame& frame) {
+    char buffer[34];
+    INT8U pos = 0;
+    const bool isExtended = (frame.flags & LW232_FRAME_FLAG_EXTENDED) != 0;
+
+    buffer[pos++] = isExtended ? LW232_TR29 : LW232_TR11;
+
+    if (isExtended) {
+        HexHelper::byteToHex((INT8U)((frame.id >> 24) & 0xFF), &buffer[pos]); pos += 2;
+        HexHelper::byteToHex((INT8U)((frame.id >> 16) & 0xFF), &buffer[pos]); pos += 2;
+        HexHelper::byteToHex((INT8U)((frame.id >> 8) & 0xFF), &buffer[pos]); pos += 2;
+        HexHelper::byteToHex((INT8U)(frame.id & 0xFF), &buffer[pos]); pos += 2;
+    } else {
+        const INT16U canId = (INT16U)(frame.id & 0x7FF);
+        buffer[pos++] = HexHelper::toHexChar((canId >> 8) & 0x0F);
+        HexHelper::byteToHex((INT8U)(canId & 0xFF), &buffer[pos]); pos += 2;
+    }
+
+    buffer[pos++] = HexHelper::toHexChar(frame.len & 0x0F);
+
+    for (INT8U idx = 0; idx < frame.len; idx++) {
+        HexHelper::byteToHex(frame.data[idx], &buffer[pos]);
+        pos += 2;
+    }
+
+    if (lw232TimeStamp == LW232_TIMESTAMP_ON_NORMAL) {
+        HexHelper::byteToHex(HIGH_BYTE(frame.timestamp), &buffer[pos]); pos += 2;
+        HexHelper::byteToHex(LOW_BYTE(frame.timestamp), &buffer[pos]); pos += 2;
+    }
+
+    buffer[pos++] = LW232_CR;
+    Serial.write(buffer, pos);
+}
+
+void Can232::emitFrameToGvret(const BufferedFrame& frame) {
+    const bool isExtended = (frame.flags & LW232_FRAME_FLAG_EXTENDED) != 0;
+    const INT32U idField = isExtended ? (frame.id | (1UL << 31)) : frame.id;
+    const INT32U timestampMicros = gvretTimestampsEnabled ? (INT32U)frame.timestamp * 1000UL : 0;
+    const INT8U busEncoded = 0; // single-bus hardware
+
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x00); // CAN frame indicator
+
+    Serial.write((INT8U)(timestampMicros & 0xFF));
+    Serial.write((INT8U)((timestampMicros >> 8) & 0xFF));
+    Serial.write((INT8U)((timestampMicros >> 16) & 0xFF));
+    Serial.write((INT8U)((timestampMicros >> 24) & 0xFF));
+
+    Serial.write((INT8U)(idField & 0xFF));
+    Serial.write((INT8U)((idField >> 8) & 0xFF));
+    Serial.write((INT8U)((idField >> 16) & 0xFF));
+    Serial.write((INT8U)((idField >> 24) & 0xFF));
+
+    INT8U lenBus = (INT8U)((busEncoded << 4) & 0xF0);
+    lenBus |= (frame.len & 0x0F);
+    Serial.write(lenBus);
+    for (INT8U idx = 0; idx < frame.len; idx++) {
+        Serial.write(frame.data[idx]);
+    }
+}
+
+void Can232::emitGvretRxFrames() {
+    if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+        return;
+    }
+
+    INT8U emitted = 0;
+    BufferedFrame frame;
+    while (emitted < GVRET_MAX_FRAMES_PER_LOOP && popRxFrame(frame)) {
+        emitFrameToGvret(frame);
+        statsRecordRxFrame();
+        emitted++;
+    }
+}
+
+void Can232::emitGvretBusParams() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x06);
+
+    INT8U flags0 = 0;
+    if (gvretCan0Enabled) {
+        flags0 |= 0x01;
+    }
+    if (gvretCan0ListenOnly) {
+        flags0 |= 0x10;
+    }
+    Serial.write(flags0);
+    Serial.write((INT8U)(gvretCan0Baud & 0xFF));
+    Serial.write((INT8U)((gvretCan0Baud >> 8) & 0xFF));
+    Serial.write((INT8U)((gvretCan0Baud >> 16) & 0xFF));
+    Serial.write((INT8U)((gvretCan0Baud >> 24) & 0xFF));
+
+    // CAN1 not present
+    Serial.write((INT8U)0x00);
+    Serial.write((INT8U)0x00);
+    Serial.write((INT8U)0x00);
+    Serial.write((INT8U)0x00);
+    Serial.write((INT8U)0x00);
+}
+
+void Can232::emitGvretDeviceInfo() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x07);
+    Serial.write((INT8U)(GVRET_DEVICE_BUILD_NUM & 0xFF));
+    Serial.write((INT8U)((GVRET_DEVICE_BUILD_NUM >> 8) & 0xFF));
+    Serial.write((INT8U)0x00); // eeprom version
+    Serial.write((INT8U)0x01); // file type marker
+    Serial.write((INT8U)0x00); // autolog
+    Serial.write((INT8U)0x00); // single wire not supported
+}
+
+void Can232::emitGvretNumBuses() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x0C);
+    Serial.write((INT8U)0x01); // only CAN0
+}
+
+void Can232::emitGvretExtBuses() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x0D);
+    // SWCAN, LIN1, LIN2 placeholders (15 bytes total)
+    for (INT8U idx = 0; idx < 15; idx++) {
+        Serial.write((INT8U)0x00);
+    }
+}
+
+void Can232::emitGvretValidation() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x09);
+}
+
+void Can232::emitGvretTimeSync() {
+    Serial.write(GVRET_START_BYTE);
+    Serial.write((INT8U)0x01);
+    const INT32U nowUs = micros();
+    Serial.write((INT8U)(nowUs & 0xFF));
+    Serial.write((INT8U)((nowUs >> 8) & 0xFF));
+    Serial.write((INT8U)((nowUs >> 16) & 0xFF));
+    Serial.write((INT8U)((nowUs >> 24) & 0xFF));
+}
+
+void Can232::serviceCanRx() {
+    if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
+        return;
+    }
+    const INT16U maxDrainAttempts = LW232_RX_BUFFER_SIZE;
+    INT16U processed = 0;
+    while (processed < maxDrainAttempts && CAN_MSGAVAIL == checkReceive()) {
+        processed++;
+        BufferedFrame frame;
+        const RxReadStatus status = readCanFrame(frame);
+        if (status == RX_READ_NONE) {
+            break;
         }
-        else if (checkPassFilter(lw232CanId)) {// do we want to skip some addresses?
-            const INT8U extendedFrame = isExtendedFrame();
-            if (extendedFrame) {
-                Serial.print(LW232_TR29);
-                HexHelper::printFullByte(HIGH_BYTE(HIGH_WORD(lw232CanId)));
-                HexHelper::printFullByte(LOW_BYTE(HIGH_WORD(lw232CanId)));
-                HexHelper::printFullByte(HIGH_BYTE(LOW_WORD(lw232CanId)));
-                HexHelper::printFullByte(LOW_BYTE(LOW_WORD(lw232CanId)));
+        if (status == RX_READ_SKIPPED) {
+            continue;
+        }
+        if (!pushRxFrame(frame)) {
+            statsRecordRxDrop();
+            statsRecordRxOverflow();
+            if (lw232DebugMode) {
+                dbg1("RX buffer overflow");
             }
-            else {
-                Serial.print(LW232_TR11);
-                HexHelper::printNibble(HIGH_BYTE(LOW_WORD(lw232CanId)));
-                HexHelper::printFullByte(LOW_BYTE(LOW_WORD(lw232CanId)));
-            }
-            //write data len
-            HexHelper::printNibble(lw232PacketLen);
-            //write data
-            for (idx = 0; idx < lw232PacketLen; idx++) {
-                HexHelper::printFullByte(lw232Buffer[idx]);
-            }
-            //write timestamp if needed
-            if (lw232TimeStamp == LW232_TIMESTAMP_ON_NORMAL) {
-                INT16U timeMs = millis() % 60000;  // LAWICEL timer rolls over every 60 seconds
-                HexHelper::printFullByte(HIGH_BYTE(timeMs));
-                HexHelper::printFullByte(LOW_BYTE(timeMs));
-            }
-            statsRecordRxFrame();
+        } else if (lw232DebugMode) {
+            dbg2("RX frame processed, ID:", frame.id);
         }
     }
-    else {
-        ret = LW232_ERR;
+}
+
+bool Can232::consumeInterruptFlag() {
+    bool pending = false;
+    noInterrupts();
+    if (mcpInterruptPending) {
+        pending = true;
+        mcpInterruptPending = false;
     }
-    return ret;
+    interrupts();
+    return pending;
+}
+
+Can232::RxReadStatus Can232::readCanFrame(BufferedFrame& frame) {
+    INT32U canId = 0;
+    INT8U len = 0;
+    if (CAN_OK != readMsgBufID(&canId, &len, frame.data)) {
+        return RX_READ_NONE;
+    }
+    if (canId > 0x1FFFFFFF) {
+        return RX_READ_SKIPPED;
+    }
+
+    frame.flags = 0;
+    const INT8U extended = isExtendedFrame();
+    if (extended) {
+        frame.flags |= LW232_FRAME_FLAG_EXTENDED;
+    }
+#ifndef _MCP_FAKE_MODE_
+    if (lw232CAN.isRemoteRequest()) {
+        frame.flags |= LW232_FRAME_FLAG_REMOTE;
+    }
+#endif
+
+    if (checkPassFilter(canId) != LW232_FILTER_PROCESS) {
+        return RX_READ_SKIPPED;
+    }
+
+    frame.id = extended ? (canId & 0x1FFFFFFF) : (canId & 0x7FF);
+    frame.len = (len > LW232_FRAME_MAX_LENGTH) ? LW232_FRAME_MAX_LENGTH : len;
+    frame.timestamp = static_cast<INT16U>(millis() % 60000);
+    return RX_READ_READY;
+}
+
+bool Can232::rxBufferEmpty() const {
+    return rxCount == 0;
+}
+
+void Can232::clearRxBuffer() {
+    noInterrupts();
+    rxHead = 0;
+    rxTail = 0;
+    rxCount = 0;
+    interrupts();
+}
+
+bool Can232::pushRxFrame(const BufferedFrame& frame) {
+    bool pushed = true;
+    noInterrupts();
+    if (rxCount >= LW232_RX_BUFFER_SIZE) {
+        pushed = false;
+    } else {
+        rxBuffer[rxHead] = frame;
+        rxHead++;
+        if (rxHead >= LW232_RX_BUFFER_SIZE) {
+            rxHead = 0;
+        }
+        rxCount++;
+    }
+    interrupts();
+    return pushed;
+}
+
+bool Can232::popRxFrame(BufferedFrame& frame) {
+    bool popped = false;
+    noInterrupts();
+    if (rxCount > 0) {
+        frame = rxBuffer[rxTail];
+        rxTail++;
+        if (rxTail >= LW232_RX_BUFFER_SIZE) {
+            rxTail = 0;
+        }
+        rxCount--;
+        popped = true;
+    }
+    interrupts();
+    return popped;
 }
 
 
@@ -559,15 +1228,22 @@ INT8U Can232::checkPassFilter(INT32U addr) {
 INT8U Can232::openCanBus(INT8U mode) {
     INT8U ret = LW232_OK;
     INT8U initStatus = CAN_OK;
+    dbg2("CAN open request: mode=", mode);
+    dbg2("CAN speed selection=", lw232CanSpeedSelection);
 #ifndef _MCP_FAKE_MODE_
     initStatus = lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock);
     if (initStatus == CAN_OK) {
-        // Set the requested mode after successful initialization
         lw232CAN.setMode(mode);
+    } else {
+        dbg2("CAN init failed with status=", initStatus);
     }
+#else
+    (void)mode;
 #endif
     if (initStatus != CAN_OK) {
         ret = LW232_ERR;
+    } else {
+        clearRxBuffer();
     }
     return ret;
 }
@@ -578,6 +1254,11 @@ INT8U Can232::sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf)
     INT8U status = lw232CAN.sendMsgBuf(id, ext, rtr, len, buf);
     if (status == CAN_OK) {
         statsRecordTxFrame();
+        if (lw232DebugMode) {
+            dbg2("TX frame sent, ID:", id);
+        }
+    } else if (lw232DebugMode) {
+        dbg2("TX failed, status:", status);
     }
     return status;
 #else
@@ -722,6 +1403,40 @@ INT8U Can232::findCanBaudIndex(INT8U canSpeed) {
     return 0;
 }
 
+INT8U Can232::findCanBaudIndexByBps(INT32U bps) {
+    switch (bps) {
+    case 10000: return 0;
+    case 20000: return 1;
+    case 50000: return 2;
+    case 100000: return 3;
+    case 125000: return 4;
+    case 250000: return 5;
+    case 500000: return 6;
+    case 800000: return 6; // closest supported rate on this hardware
+    case 1000000: return 8;
+    case 83333: return 9;
+    default:
+        return 0xFF;
+    }
+}
+
+static INT32U baudIndexToBps(INT8U idx) {
+    switch (idx) {
+    case 0: return 10000;
+    case 1: return 20000;
+    case 2: return 50000;
+    case 3: return 100000;
+    case 4: return 125000;
+    case 5: return 250000;
+    case 6: return 500000;
+    case 7: return 500000; // hardware constraint
+    case 8: return 1000000;
+    case 9: return 83333;
+    default:
+        return 0;
+    }
+}
+
 INT8U Can232::computeAutoStartChecksum(INT8U version, INT8U mode, INT8U idx) {
     return version ^ mode ^ idx ^ LW232_AUTOSTART_CHECKSUM_SEED;
 }
@@ -746,11 +1461,13 @@ void Can232::loadAutoStartPreference() {
     if (versionValid && checksumValid && modeValid && indexValid) {
         lw232AutoStart = storedMode;
         lw232CanSpeedIndex = storedIndex;
+        gvretCan0Baud = baudIndexToBps(lw232CanSpeedIndex);
         dbg2("Loaded autostart from EEPROM: mode=", storedMode);
     } else {
         // Validation failed - use defaults and log issue
         lw232AutoStart = LW232_AUTOSTART_OFF;
         lw232CanSpeedIndex = findCanBaudIndex(LW232_DEFAULT_CAN_RATE);
+        gvretCan0Baud = baudIndexToBps(lw232CanSpeedIndex);
 
         // Log validation failures for debugging
         if (!versionValid) {
@@ -792,8 +1509,12 @@ void Can232::maybeAutoStart() {
     const INT8U requestedMode = (lw232AutoStart == LW232_AUTOSTART_ON_NORMAL) ? MODE_NORMAL : MODE_LISTENONLY;
     if (openCanBus(requestedMode) == LW232_OK) {
         lw232CanChannelMode = (requestedMode == MODE_NORMAL) ? LW232_STATUS_CAN_OPEN_NORMAL : LW232_STATUS_CAN_OPEN_LISTEN;
+        gvretCan0Enabled = true;
+        gvretCan0ListenOnly = (requestedMode != MODE_NORMAL);
     } else {
         lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
+        clearRxBuffer();
+        gvretCan0Enabled = false;
     }
 }
 
@@ -819,6 +1540,9 @@ INT8U Can232::readLawicelStatusFlags() {
 
     INT8U eflg = 0;
     lw232CAN.checkError(&eflg);
+    if (lw232DebugMode && eflg != 0) {
+        dbg2("MCP2515 EFLG:", eflg);
+    }
     if (eflg & MCP_EFLG_EWARN) {
         status |= 0x04;
     }
@@ -837,23 +1561,56 @@ INT8U Can232::readLawicelStatusFlags() {
     return status;
 }
 
-void Can232::parseCanStdId() {
-    lw232CanId = (((INT32U)HexHelper::parseNibble(lw232Message[1])) << 8)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[2])) << 4)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[3])));
-    lw232CanId &= 0x7FF;
+void Can232::updateBusLoad() {
+    unsigned long now = millis();
+    if (now - lastBusLoadCalc < 500) {
+        return;  // Update every 500ms
+    }
+
+    unsigned long framesDelta = g_canStats.framesRx - lastBusLoadFrameCount;
+
+    // Calculate frames per second
+    g_canStats.currentFramesPerSecond = (unsigned int)framesDelta;
+
+    lastBusLoadFrameCount = g_canStats.framesRx;
+    lastBusLoadCalc = now;
 }
 
-void Can232::parseCanExtId() {
-    lw232CanId = (((INT32U)HexHelper::parseNibble(lw232Message[1])) << 28)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[2])) << 24)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[3])) << 20)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[4])) << 16)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[5])) << 12)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[6])) << 8)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[7])) << 4)
-        + (((INT32U)HexHelper::parseNibble(lw232Message[8])));
-    lw232CanId &= 0x1FFFFFFF;
+bool Can232::parseCanStdId() {
+    INT32U id = 0;
+    for (INT8U idx = 0; idx < 3; idx++) {
+        INT8U nibble = HexHelper::parseNibble(lw232Message[1 + idx]);
+        if (nibble == HEX_INVALID) {
+            return false;
+        }
+        id = (id << 4) | nibble;
+    }
+    lw232CanId = id & 0x7FF;
+    return true;
+}
+
+bool Can232::parseCanExtId() {
+    INT32U id = 0;
+    for (INT8U idx = 0; idx < 8; idx++) {
+        INT8U nibble = HexHelper::parseNibble(lw232Message[1 + idx]);
+        if (nibble == HEX_INVALID) {
+            return false;
+        }
+        id = (id << 4) | nibble;
+    }
+    lw232CanId = id & 0x1FFFFFFF;
+    return true;
+}
+
+char HexHelper::toHexChar(INT8U nibble) {
+    nibble &= 0x0F;
+    return (nibble < 10) ? static_cast<char>('0' + nibble)
+                         : static_cast<char>('A' + (nibble - 10));
+}
+
+void HexHelper::byteToHex(INT8U value, char *out) {
+    out[0] = toHexChar(value >> 4);
+    out[1] = toHexChar(value & 0x0F);
 }
 
 void HexHelper::printFullByte(INT8U b) {
@@ -872,25 +1629,24 @@ void HexHelper::printNibble(INT8U b) {
 
 
 INT8U HexHelper::parseNibble(INT8U hex) {
-    INT8U ret = 0;
-    if (hex >= '0' && hex <= '9') {
-        ret = hex - '0';
-    } else if (hex >= 'a' && hex <= 'f') {
-        ret = hex - 'a' + 10;
-    } else if (hex >= 'A' && hex <= 'F') {
-        ret = hex - 'A' + 10;
-    } // else error, return 0
-    return ret;
+    INT8U value = readHexLookup(hex);
+    return (value <= 0x0F) ? value : HEX_INVALID;
 }
 
-INT8U HexHelper::parseFullByte(INT8U H, INT8U L) {
-    return (parseNibble(H) << 4) + parseNibble(L);
+INT8U HexHelper::parseFullByte(INT8U H, INT8U L, bool *ok) {
+    INT8U hi = parseNibble(H);
+    INT8U lo = parseNibble(L);
+    const bool success = (hi != HEX_INVALID && lo != HEX_INVALID);
+    if (ok) {
+        *ok = success;
+    }
+    return success ? (INT8U)((hi << 4) + lo) : 0;
 }
 
 INT8U HexHelper::parseNibbleWithLimit(INT8U hex, INT8U limit) {
     INT8U ret = parseNibble(hex);
-    if (ret < limit)
-        return ret;
-    else
-        return 0;
+    if (ret == HEX_INVALID || ret >= limit) {
+        return HEX_INVALID;
+    }
+    return ret;
 }

@@ -14,6 +14,9 @@ void statsReset() {
     g_canStats.lastCommandMillis = 0;
     g_canStats.lastRxMillis = 0;
     g_canStats.lastTxMillis = 0;
+    g_canStats.rxBufferDrops = 0;
+    g_canStats.rxBufferOverflows = 0;
+    g_canStats.currentFramesPerSecond = 0;
     interrupts();
 }
 
@@ -30,4 +33,12 @@ void statsRecordRxFrame() {
 void statsRecordTxFrame() {
     g_canStats.framesTx++;
     writeMillis(g_canStats.lastTxMillis);
+}
+
+void statsRecordRxDrop() {
+    g_canStats.rxBufferDrops++;
+}
+
+void statsRecordRxOverflow() {
+    g_canStats.rxBufferOverflows++;
 }

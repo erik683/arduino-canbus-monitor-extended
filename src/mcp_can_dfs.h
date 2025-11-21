@@ -42,7 +42,7 @@
 /*
  *   Begin mt
  */
-#define TIMEOUTVALUE    50
+#define TIMEOUTVALUE    30
 #define MCP_SIDH        0
 #define MCP_SIDL        1
 #define MCP_EID8        2
@@ -412,7 +412,7 @@
 
 #define CANUSELOOP 0
 
-#define CANSENDTIMEOUT (200)                                            /* milliseconds                 */
+#define CANSENDTIMEOUT (150)                                            /* milliseconds                 */
 
 /*
  *   initial value of gCANAutoProcess

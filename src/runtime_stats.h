@@ -10,6 +10,9 @@ struct CanRuntimeStats {
     volatile unsigned long lastCommandMillis;
     volatile unsigned long lastRxMillis;
     volatile unsigned long lastTxMillis;
+    volatile unsigned long rxBufferDrops;
+    volatile unsigned long rxBufferOverflows;
+    volatile unsigned int currentFramesPerSecond;  // Current frames per second rate
 };
 
 extern CanRuntimeStats g_canStats;
@@ -18,5 +21,7 @@ void statsReset();
 void statsRecordCommand();
 void statsRecordRxFrame();
 void statsRecordTxFrame();
+void statsRecordRxDrop();
+void statsRecordRxOverflow();
 
 #endif  // RUNTIME_STATS_H

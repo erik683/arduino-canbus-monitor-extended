@@ -31,6 +31,7 @@ UART_BAUD_TABLE: Tuple[int, ...] = (
     19_200,
     9_600,
     2_400,
+    500_000,
 )
 
 
@@ -71,6 +72,7 @@ class SlcanHarness:
     port: str
     baud: int = 115200
     timeout: float = 1.0
+    boot_timeout: float = 3.0
 
     def __post_init__(self) -> None:
         try:
@@ -82,8 +84,7 @@ class SlcanHarness:
             )
         except serial.SerialException as exc:
             raise SystemExit(f"Failed to open {self.port}: {exc}") from exc
-        # Allow the MCU (and MCP2515) plenty of time to reboot after the port comes up
-        time.sleep(4.0)
+        self._await_device_ready()
         self.flush()
         # Prime the device - some Arduino-based SLCAN devices need initialization
         # Try sending CR/LF first, then a dummy command
@@ -132,8 +133,7 @@ class SlcanHarness:
             self.serial.open()
         except serial.SerialException as exc:
             raise SystemExit(f"Failed to reopen {self.port} during reset: {exc}") from exc
-        # Opening a CDC/ACM port toggles DTR, which resets the Arduino bootloader.
-        time.sleep(4.0)
+        self._await_device_ready()
         self.flush()
 
     def set_host_baud(self, baud: int) -> None:
@@ -211,6 +211,26 @@ class SlcanHarness:
     def transact(self, command: str) -> bytes:
         """Lower-level helper that returns the payload for data-bearing commands."""
         return self._transact(command)
+
+    def _await_device_ready(self) -> None:
+        """Poll the adapter until it responds or the boot timeout elapses."""
+        deadline = time.monotonic() + self.boot_timeout
+        while time.monotonic() < deadline:
+            try:
+                self.serial.write(b"V\r")
+                self.serial.flush()
+            except serial.SerialException:
+                return
+            poll_start = time.monotonic()
+            while time.monotonic() - poll_start < 0.25:
+                pending = self.serial.in_waiting
+                if pending:
+                    # Drain whatever banner/response arrived so later tests start clean.
+                    self.serial.read(pending)
+                    return
+                time.sleep(0.01)
+        # Fallback to a short delay so very slow boards still have time to boot.
+        time.sleep(0.25)
 
 
 def ensure_closed(harness: SlcanHarness) -> None:

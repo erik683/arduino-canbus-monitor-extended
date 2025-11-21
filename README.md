@@ -51,7 +51,7 @@ newgrp dialout
 ### Configuration
 - Board: Arduino Uno (change env in `platformio.ini`)
 - Libraries: Seeed-Studio CAN_BUS_Shield and `liquidcrystal_i2c` for the optional LCD
-- Receive buffering defaults to 32 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with `build_flags = -DLW232_RX_BUFFER_SIZE=64` in `platformio.ini` if you need a deeper queue for heavy traffic.
+- Receive buffering defaults to 64 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue for heavy traffic.
 
 ### Changing boards
 To use a different Arduino board, edit `platformio.ini`:
@@ -104,16 +104,17 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | P | Full | `P[CR]` | Poll single frame from RX buffer |
 | A | Full | `A[CR]` | Poll all pending frames from RX buffer |
 | F | Full | `F[CR]` | Read status flags (returns `Fnxx` bitmap) |
-| X | Full | `Xn[CR]` | Auto-poll mode (X0=off, X1=on); uses a 32-frame circular RX buffer |
+| X | Full | `Xn[CR]` or `X[CR]` | Auto-poll mode (X0=off, X1=on) or query; uses a 64-frame circular RX buffer |
 | W | None | `Wn[CR]` | Hardware filter mode (dual/single) |
 | M | None | `Mxxxxxxxx[CR]` | Acceptance code register (MCP2515 not wired up) |
 | m | None | `mxxxxxxxx[CR]` | Acceptance mask register (MCP2515 not wired up) |
-| U | Limited | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-6); 115200 baud recommended |
+| U | Limited | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-7); 115200 baud recommended |
 | V/v | Full | `V[CR]` or `v[CR]` | Get firmware version (V1013) |
 | N | Full | `N[CR]` | Get serial number (NA123) |
 | Z | Full | `Zn[CR]` or `Z[CR]` | Timestamp mode (Z0=off, Z1=on) or query; persists to EEPROM |
 | Q | Full | `Qn[CR]` or `Q[CR]` | Auto-start mode (Q0, Q1, Q2) or query; persists to EEPROM |
-| i | Custom | `i[CR]` | Diagnostic snapshot: `iCCCCRRRRTTTTUUUUddddooooFF` (hex counters + FPS). Requires CAN channel open. |
+| i | Custom | `i[CR]` | Diagnostic snapshot: `iCCCCRRRRTTTTUUUUddddooooFFD` (hex counters + FPS + debug mode). Requires CAN channel open. |
+| @ | Custom | `@DBGn[CR]` | Runtime debug toggle (0=off, 1=on); requires compile-time ENABLE_CAN_DEBUG_LOGGING=1 |
 
 ### Power-on behavior
 - CAN channel: closed by default
@@ -128,6 +129,14 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 - RX pipeline uses a shared circular buffer so `P`, `A`, and `X` read from the same queue without dropping bursts (`src/can-232.h`).
 - Strict serial parser validates LAWICEL command formatting before touching the MCP2515.
 - Bus load telemetry and optional LCD support expose frames-per-second data via `g_canStats`.
+- Runtime debug logging can be enabled with `@DBG1[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1` at compile time) for troubleshooting CAN bus issues.
+
+### GVRET (experimental)
+- Send `@GVRET[CR]` to swap from LAWICEL to the GVRET-compatible binary menu (or build with `-DLW232_DEFAULT_PROTOCOL_MODE=LW232_PROTOCOL_GVRET` to boot directly into it).
+- SavvyCAN handshake supported: `0xE7 0xE7` enters binary, then `0xF1` command stream (device info `0x07`, bus params `0x06`, validation `0x09`, time sync `0x01`, bus count `0x0C/0x0D`).
+- Bus setup command `0x05` consumes CAN0 baud/enable/listen bits, opens the bus when flagged, and reports back through `0x06` (single bus only). Unsupported buses (CAN1, SWCAN, LIN) are reported as disabled.
+- RX frames stream as `[0xF1][0x00][timestamp_us 4][id|ext_bit][len|bus<<4][data...]` with timestamps in microseconds and bus fixed to 0.
+- Unsupported on this hardware: digital outputs, single-wire, flow control, and hardware filters/masks (host may probe but nothing is applied).
 
 ## PC Software
 

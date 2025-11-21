@@ -18,8 +18,16 @@
 
 // #define DEBUG_MODE  // Disabled for SavvyCAN LAWICEL compatibility
 
+static void handleCanInterrupt() {
+    Can232::notifyCanInterrupt();
+}
+
 void setup() {
     Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200.
+#if defined(LW232_CAN_INT_PIN) && defined(digitalPinToInterrupt)
+    pinMode(LW232_CAN_INT_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(LW232_CAN_INT_PIN), handleCanInterrupt, FALLING);
+#endif
 
         // Can232::init  (RATE, CLOCK)
         // Rates: CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_500KBPS, CAN_1000KBPS, CAN_83K3BPS
@@ -31,8 +39,7 @@ void setup() {
 //        Can232::init();             // rate and clock = LW232_DEFAULT_CAN_RATE and LW232_DEFAULT_CLOCK_FREQ
 //        Can232::init(CAN_125KBPS);  // rate = 125, clock = LW232_DEFAULT_CLOCK_FREQ
     statsReset();
-    Can232::init(CAN_500KBPS, MCP_16MHz); // set default rate you need here and clock frequency of CAN shield. Typically it is 16MHz, but on some MCP2515 + TJA1050 it is 8Mhz
-
+    Can232::init(CAN_125KBPS, MCP_16MHz); // set default rate you need here and clock frequency of CAN shield. Typically it is 16MHz, but on some MCP2515 + TJA1050 it is 8Mhz
 
     // optional custom packet filter to reduce number of messages comingh through to canhacker
     // Can232::setFilter(myCustomAddressFilter); 

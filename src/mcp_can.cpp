@@ -398,11 +398,6 @@ INT8U MCP_CAN::mcp2515_configRate(const INT8U canSpeed, const INT8U clock)
 void MCP_CAN::mcp2515_initCANBuffers(void)
 {
     INT8U i, a1, a2, a3;
-    
-    INT8U std = 0;               
-    INT8U ext = 1;
-    INT32U ulMask = 0x00, ulFilt = 0x00;
-
 
 //    mcp2515_write_id(MCP_RXM0SIDH, ext, ulMask);			/*Set both masks to 0           */
 //    mcp2515_write_id(MCP_RXM1SIDH, ext, ulMask);			/*Mask register ignores ext bit */
@@ -487,10 +482,10 @@ INT8U MCP_CAN::mcp2515_init(const INT8U canSpeed, const INT8U clock)            
 #if (DEBUG_RXANY==1)
                                                                         /* enable both receive-buffers  */
                                                                         /* to receive any message       */
-                                                                        /* and enable rollover          */
+                                                                        /* no rollover                  */
         mcp2515_modifyRegister(MCP_RXB0CTRL,
-        MCP_RXB_RX_MASK | MCP_RXB_BUKT_MASK,
-        MCP_RXB_RX_ANY | MCP_RXB_BUKT_MASK);
+        MCP_RXB_RX_MASK,
+        MCP_RXB_RX_ANY);
         mcp2515_modifyRegister(MCP_RXB1CTRL, MCP_RXB_RX_MASK,
         MCP_RXB_RX_ANY);
 #else
@@ -498,10 +493,10 @@ INT8U MCP_CAN::mcp2515_init(const INT8U canSpeed, const INT8U clock)            
                                                                         /* to receive messages          */
                                                                         /* with std. and ext. identifie */
                                                                         /* rs                           */
-                                                                        /* and enable rollover          */
+                                                                        /* no rollover                  */
         mcp2515_modifyRegister(MCP_RXB0CTRL,
-        MCP_RXB_RX_MASK | MCP_RXB_BUKT_MASK,
-        MCP_RXB_RX_STDEXT | MCP_RXB_BUKT_MASK );
+        MCP_RXB_RX_MASK,
+        MCP_RXB_RX_STDEXT );
         mcp2515_modifyRegister(MCP_RXB1CTRL, MCP_RXB_RX_MASK,
         MCP_RXB_RX_STDEXT);
 #endif
@@ -683,6 +678,11 @@ INT8U MCP_CAN::begin(INT8U speedset, const INT8U clockset)
     INT8U res = MCP2515_OK;
 
     SPI.begin();
+    // Run the MCP2515 SPI bus as fast as the MCU allows (16 MHz MCU -> 8 MHz SPI).
+    // Faster draining of RX buffers reduces the chance of missed frames under load.
+    SPI.setDataMode(SPI_MODE0);
+    SPI.setBitOrder(MSBFIRST);
+    SPI.setClockDivider(SPI_CLOCK_DIV2);
     res = mcp2515_init(speedset, clockset);
     if (res == MCP2515_OK) return CAN_OK;
     else return CAN_FAILINIT;
