@@ -4,9 +4,8 @@
 
 This project includes MCP configuration to share documentation with Codex and other AI assistants. The documentation covers:
 
-1. **GVRET Protocol** - Binary serial protocol for CAN bus communication
-2. **Arduino Uno R3** - Microcontroller specifications and hardware layout
-3. **MCP2515 Shield** - CAN Bus shield specifications and pin connections
+1. **Arduino Uno R3** - Microcontroller specifications and hardware layout
+2. **MCP2515 Shield** - CAN Bus shield specifications and pin connections
 
 ## Configuration File Location
 
@@ -21,7 +20,7 @@ The MCP configuration file is located at:
   "mcpServers": {
     "ArduinoCANBusDocs": {
       "url": "file:///home/erikm/arduino-canbus-monitor/docs",
-      "description": "Documentation for GVRET protocol, Arduino Uno R3, and MCP2515 CAN Bus Shield"
+      "description": "Documentation for Arduino Uno R3 and MCP2515 CAN Bus Shield"
     }
   }
 }
@@ -31,21 +30,14 @@ The MCP configuration file is located at:
 
 The following documentation files are available in the `docs/` directory:
 
-1. **GVRET_PROTOCOL.md** - Complete GVRET protocol specification including:
-   - Binary packet structure
-   - Command set (CAN transmission, reception, bus control)
-   - Timestamp format
-   - Error handling
-   - Advantages over ASCII protocols
-
-2. **ARDUINO_UNO_R3.md** - Arduino Uno R3 specifications including:
+1. **ARDUINO_UNO_R3.md** - Arduino Uno R3 specifications including:
    - Technical specifications (microcontroller, memory, power)
    - Pin layout and functions
    - Communication interfaces (Serial, SPI, I2C)
    - Hardware layout diagram
    - Programming information
 
-3. **MCP2515_SHIELD.md** - MCP2515 CAN Bus Shield documentation including:
+2. **MCP2515_SHIELD.md** - MCP2515 CAN Bus Shield documentation including:
    - Technical specifications
    - Pin connections to Arduino
    - Hardware layout
@@ -87,7 +79,7 @@ You can also serve documentation via a local HTTP server:
 To verify the MCP setup is working:
 
 1. Open Cursor/Codex
-2. Try referencing documentation: `@Docs GVRET`
+2. Try referencing documentation: `@Docs Arduino Uno` or `@Docs MCP2515`
 3. The AI assistant should be able to access and reference the documentation
 
 ## Troubleshooting

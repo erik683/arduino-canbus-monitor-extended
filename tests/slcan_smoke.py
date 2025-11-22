@@ -878,15 +878,6 @@ def test_debug_toggle(h: SlcanHarness) -> None:
         raise RegressionFailure("Debug mode remained on after @DBG0.")
 
 
-def test_gvret_switch_and_reset(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    if h.transact("@GVRET\r") != b"GVRET":
-        raise RegressionFailure("GVRET handshake banner missing.")
-    h.reset_device()
-    payload = h.transact("V\r")
-    if not payload.startswith(b"V"):
-        raise RegressionFailure("Adapter did not return to LAWICEL after GVRET reset.")
-
 TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("version", test_version),
     ("version_lowercase", test_lowercase_version),
@@ -920,7 +911,6 @@ TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("acceptance_mask_query", test_acceptance_mask_query_format),
     ("acceptance_mask_roundtrip", test_acceptance_mask_roundtrip),
     ("debug_toggle", test_debug_toggle),
-    ("gvret_switch", test_gvret_switch_and_reset),
 )
 
 

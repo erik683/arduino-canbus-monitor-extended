@@ -17,14 +17,13 @@
  * DESCRIPTION:
  * Header file defining the Can232 class and associated constants for implementing
  * the LAWICEL CAN232/CANUSB ASCII protocol. This file also includes support for
- * the SavvyCAN GVRET binary protocol, making the adapter compatible with both
+ * LAWICEL protocol, making the adapter compatible with SavvyCAN and other tools
  * text-based and binary CAN monitoring applications.
  * 
  * KEY COMPONENTS:
  * 
  * 1. PROTOCOL DEFINITIONS:
  *    - LAWICEL command codes (S, O, L, C, t, T, r, R, P, A, F, X, W, M, m, U, V, N, Z, Q)
- *    - GVRET binary protocol opcodes and structures
  *    - Command parameters, return codes, frame formats, and buffer sizes
  * 
  * 2. Can232 CLASS:
@@ -32,7 +31,7 @@
  *    - Public static interface: init(), setFilter(), loop(), serialEvent()
  *    - BufferedFrame structure for queuing received CAN messages
  *    - Circular RX buffer (configurable size via LW232_RX_BUFFER_SIZE)
- *    - State machine for LAWICEL and GVRET protocol parsing
+ *    - State machine for LAWICEL protocol parsing
  * 
  * 3. CONFIGURATION CONSTANTS:
  *    - Baud rate tables for serial UART (0-7) and CAN bus (0-9)
@@ -45,7 +44,7 @@
  *    - Optimized nibble parsing with lookup table
  * 
  * ROLE IN CODEBASE:
- * This header defines the interface contract for LAWICEL/GVRET protocol handling.
+ * This header defines the interface contract for LAWICEL protocol handling.
  * It bridges the Arduino sketch (arduino-canbus-monitor.ino), MCP2515 CAN driver
  * (mcp_can.h/cpp), and runtime statistics (runtime_stats.h/cpp). All command
  * parsing, frame buffering, filtering, EEPROM persistence, and dual-protocol
@@ -183,38 +182,6 @@
 #define LW232_INPUT_STRING_BUFFER_SIZE 64
 
 #define LW232_PROTOCOL_LAWICEL         0x00
-#define LW232_PROTOCOL_GVRET           0x01
-
-#ifndef LW232_DEFAULT_PROTOCOL_MODE
-#define LW232_DEFAULT_PROTOCOL_MODE LW232_PROTOCOL_LAWICEL
-#endif
-
-#define GVRET_RET_ACK                  0x00
-#define GVRET_RET_NAK                  0xFF
-#define GVRET_CMD_TX_STD               0x01
-#define GVRET_CMD_TX_EXT               0x02
-#define GVRET_CMD_RX_STD               0x03
-#define GVRET_CMD_RX_EXT               0x04
-#define GVRET_CMD_SET_BITRATE          0x05
-#define GVRET_CMD_OPEN_NORMAL          0x06
-#define GVRET_CMD_CLOSE                0x07
-#define GVRET_CMD_OPEN_LISTEN          0x08
-#define GVRET_CMD_GET_VERSION          0x09
-#define GVRET_CMD_GET_SERIAL           0x0A
-#define GVRET_CMD_SET_DIGITAL_OUT      0x0B
-#define GVRET_CMD_SET_SINGLE_WIRE      0x0C
-#define GVRET_CMD_SET_SILENT_MODE      0x0D
-#define GVRET_CMD_ENABLE_TIMESTAMP     0x0E
-#define GVRET_CMD_DISABLE_TIMESTAMP    0x0F
-#define GVRET_CMD_FLOW_CONTROL         0x10
-#define GVRET_CMD_SET_FILTER           0x11
-#define GVRET_CMD_SET_MASK             0x12
-
-#define GVRET_MAX_PACKET_SIZE          32
-#define GVRET_MAX_FRAMES_PER_LOOP      8
-#define GVRET_START_BYTE               0xF1
-#define GVRET_HANDSHAKE_BYTE           0xE7
-#define GVRET_DEVICE_BUILD_NUM         333
 
 #define LW232_OFF                      '0'
 #define LW232_ON_ONE                   '1'
@@ -346,30 +313,6 @@ private:
     String inputString = "";         // a string to hold incoming data
     boolean stringComplete = false;  // whether the string is complete
     volatile bool mcpInterruptPending = false;
-    INT8U protocolMode = LW232_DEFAULT_PROTOCOL_MODE;
-    bool gvretTimestampsEnabled = true;
-    bool gvretSilentMode = false;
-    INT8U gvretBuffer[GVRET_MAX_PACKET_SIZE];
-    INT8U gvretBufferLen = 0;
-    INT8U gvretHandshakeCount = 0;
-    INT32U gvretCan0Baud = 500000; // default for reporting
-    bool gvretCan0Enabled = false;
-    bool gvretCan0ListenOnly = false;
-
-    enum class GvretRxState : INT8U {
-        WAIT_START,
-        GET_COMMAND,
-        BUILD_CAN_FRAME,
-        GET_SETUP_BYTES,
-        IGNORE_COMMAND
-    };
-    GvretRxState gvretRxState = GvretRxState::WAIT_START;
-    INT8U gvretRxStep = 0;
-    INT8U gvretCurrentCmd = 0;
-    INT32U gvretHostFrameId = 0;
-    INT8U gvretHostBus = 0;
-    INT8U gvretHostLen = 0;
-    INT8U gvretHostData[GVRET_MAX_PACKET_SIZE];
 
     INT8U parseAndRunCommand();
     INT8U exec();
