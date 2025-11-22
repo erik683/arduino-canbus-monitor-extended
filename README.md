@@ -75,7 +75,7 @@ Before flashing to a vehicle or sharing firmware, run the LAWICEL regression har
 pip install --upgrade pyserial
 python tests/slcan_smoke.py --port /dev/ttyACM0  # set to your device path
 ```
-The suite exercises 12 core LAWICEL commands. See `tests/README.md` for details.
+The suite now drives every implemented LAWICEL command (and the custom `i`/`@DBGn` hooks) against a live 125 kbps CAN bus. See `tests/README.md` for hardware assumptions and the full test matrix.
 
 ## Runtime Telemetry and LCD Display
 
@@ -93,7 +93,7 @@ The suite exercises 12 core LAWICEL commands. See `tests/README.md` for details.
 - The MCP2515 INT pin raises a lightweight ISR, which `Can232::loop()` drains before falling back to the polling path so non-interrupt shields still work while shields with INT pins gain lower latency.
 - Runtime debug tracing can be flipped on and off with `@DBG1[CR]`/`@DBG0[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1`), enabling verbose logs on-demand without reflashing.
 
-- Remaining enhancement ideas (watchdog timer, error tracking, rate limiting, hardware filtering, SPI tuning, etc.) live in `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md`.
+- Remaining enhancement ideas (watchdog timer, error tracking, rate limiting, SPI tuning, etc.) live in `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md`.
 
 ## Protocol Coverage
 
@@ -116,10 +116,10 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | A | Full | `A[CR]` | Poll all pending frames from RX buffer |
 | F | Full | `F[CR]` | Read status flags (returns `Fnxx` bitmap) |
 | X | Full | `Xn[CR]` or `X[CR]` | Auto-poll mode (X0=off, X1=on) or query; uses a 64-frame circular RX buffer |
-| W | None | `Wn[CR]` | Hardware filter mode (dual/single) |
-| M | None | `Mxxxxxxxx[CR]` | Acceptance code register (MCP2515 not wired up) |
-| m | None | `mxxxxxxxx[CR]` | Acceptance mask register (MCP2515 not wired up) |
-| U | Limited | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-7); 115200 baud recommended |
+| W | Full | `Wn[CR]` or `W[CR]` | Hardware filter mode (W0=dual, W1=single) or query |
+| M | Full | `Mxxxxxxxx[CR]` or `M[CR]` | Set/query acceptance code register (SJA1000-style 4 bytes) |
+| m | Full | `mxxxxxxxx[CR]` or `m[CR]` | Set/query acceptance mask register (SJA1000-style 4 bytes) |
+| U | Full | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-7); 115200 baud recommended |
 | V/v | Full | `V[CR]` or `v[CR]` | Get firmware version (V1013) |
 | N | Full | `N[CR]` | Get serial number (NA123) |
 | Z | Full | `Zn[CR]` or `Z[CR]` | Timestamp mode (Z0=off, Z1=on) or query; persists to EEPROM |
@@ -136,23 +136,18 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 
 ### Extras
 - EEPROM settings include corruption recovery and backward compatibility.
-- Regression harness in `tests/slcan_smoke.py` covers 12 LAWICEL commands; SavvyCAN and real CAN bus hardware were used during testing.
+- Regression harness in `tests/slcan_smoke.py` now covers every implemented LAWICEL command (plus `i` and `@DBGn`) against a live 125 kbps bus; SavvyCAN and real CAN hardware were used while authoring the suite.
 - RX pipeline uses a shared circular buffer so `P`, `A`, and `X` read from the same queue without dropping bursts (`src/can-232.h`).
 - Strict serial parser validates LAWICEL command formatting before touching the MCP2515.
 - Bus load telemetry and optional LCD support expose frames-per-second data via `g_canStats`.
 - Runtime debug logging can be enabled with `@DBG1[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1` at compile time) for troubleshooting CAN bus issues.
 
-### GVRET (experimental)
-- Send `@GVRET[CR]` to swap from LAWICEL to the GVRET-compatible binary menu (or build with `-DLW232_DEFAULT_PROTOCOL_MODE=LW232_PROTOCOL_GVRET` to boot directly into it).
-- SavvyCAN handshake supported: `0xE7 0xE7` enters binary, then `0xF1` command stream (device info `0x07`, bus params `0x06`, validation `0x09`, time sync `0x01`, bus count `0x0C/0x0D`).
-- Bus setup command `0x05` consumes CAN0 baud/enable/listen bits, opens the bus when flagged, and reports back through `0x06` (single bus only). Unsupported buses (CAN1, SWCAN, LIN) are reported as disabled.
-- RX frames stream as `[0xF1][0x00][timestamp_us 4][id|ext_bit][len|bus<<4][data...]` with timestamps in microseconds and bus fixed to 0.
-- Unsupported on this hardware: digital outputs, single-wire, flow control, and hardware filters/masks (host may probe but nothing is applied).
 
 ## PC Software
 
 - Windows: SavvyCAN (recommended), CANHacker v2.00.01 ([archived copy](https://github.com/latonita/arduino-canbus-monitor/raw/master/CANHackerV2.00.01.exe)), and CAN-COOL (select RS232 + SL-CAN protocol).
 - Linux: use SLCAN/SocketCAN with the `can-utils` package (see instructions below).
+- **WSL Automation**: See `scripts/README.md` for scripts to launch SavvyCAN and monitor serial output simultaneously. Perfect for AI agent automation.
 
 ## Linux SLCAN instructions
 ### Prerequisites
@@ -184,8 +179,9 @@ sudo killall slcand
 ## Additional Documentation
 
 - `WSL_USB_SETUP.md` - detailed WSL2 USB device setup guide
+- `docs/WSL_GUI_AUTOMATION.md` - guide for GUI automation in WSL (WSLg/X11 setup, xdotool, pyautogui)
+- `scripts/README.md` - automation scripts for SavvyCAN and serial monitoring
 - `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md` - outstanding roadmap items covering watchdog, error tracking, rate limiting, filtering, and SPI tuning; README now highlights the improvements already merged.
-- `docs/plans/gvret-filtering-plan.md` - draft ideas for GVRET filtering configuration (moved for consistency, no content changes).
 - `docs/plans/lawicel-filtering-plan.md` - draft ideas for LAWICEL filtering configuration (moved for consistency, no content changes).
 - `GIT_CHEATSHEET.md` - Git workflow reference for contributors
 - `tests/README.md` - regression test suite documentation

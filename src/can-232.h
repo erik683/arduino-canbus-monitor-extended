@@ -124,7 +124,7 @@
 #define LW232_CMD_FILTER    'W' //    -        Wn[CR]               Filter mode setting. By default CAN232 works in dual filter mode (0) and is backwards compatible with previous CAN232 versions.
 #define LW232_CMD_ACC_CODE  'M' //    -        Mxxxxxxxx[CR]        Sets Acceptance Code Register (ACn Register of SJA1000). // we use MCP2515, not supported
 #define LW232_CMD_ACC_MASK  'm' //    -        mxxxxxxxx[CR]        Sets Acceptance Mask Register (AMn Register of SJA1000). // we use MCP2515, not supported
-#define LW232_CMD_UART      'U' //   YES       Un[CR]               Setup UART with a new baud rate where n is 0-6.
+#define LW232_CMD_UART      'U' //   YES       Un[CR]               Setup UART with a new baud rate where n is 0-7.
 #define LW232_CMD_VERSION1  'V' //   YES       v[CR]                Get Version number of both CAN232 hardware and software
 #define LW232_CMD_VERSION2  'v' //   YES       V[CR]                Get Version number of both CAN232 hardware and software
 #define LW232_CMD_SERIAL    'N' //   YES       N[CR]                Get Serial number of the CAN232.

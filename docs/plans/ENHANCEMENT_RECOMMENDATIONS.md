@@ -230,7 +230,6 @@ For each enhancement:
 - **Multi-channel support**: Support for multiple CAN channels on Mega2560
 
 ### Testing & Validation
-- **GVRET protocol tests**: The test suite currently focuses on LAWICEL; GVRET needs similar coverage
 - **Stress testing**: Add tests for buffer overflow conditions and high-traffic scenarios
 - **Hardware validation**: Tests for different MCP2515 modules and CAN transceiver variants
 

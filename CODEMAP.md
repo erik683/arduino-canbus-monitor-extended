@@ -22,7 +22,7 @@
 
 ## Root documentation & licensing
 - `README.md`
-  - Project overview, hardware requirements, PlatformIO build/flash instructions, LAWICEL/GVRET protocol status table, regression test instructions, and links to USB/WSL documentation and credits.
+  - Project overview, hardware requirements, PlatformIO build/flash instructions, LAWICEL protocol status table, regression test instructions, and links to USB/WSL documentation and credits.
 - `LICENSE`
   - The MIT license governing this repository (includes attribution, grant of rights, and warranty disclaimer).
 - `CAN_BUS_Shield License.txt`
@@ -63,12 +63,10 @@
   - Minimal Jekyll config enabling the `jekyll-theme-minimal` theme when rendering the `docs/` site.
 - `docs/ARDUINO_UNO_R3.md`
   - Detailed Arduino Uno R3 hardware summary (ATmega328P specs, pinouts, power connectors, interfaces, and reference links).
-- `docs/GVRET_PROTOCOL.md`
-  - GVRET binary protocol explanation (command set, frame formatting, timestamps, ACK/NAK responses, error handling, and comparison to LAWICEL).
 - `docs/MCP2515_SHIELD.md`
   - Inland/Keyestudio MCP2515 shield datasheet with CAN controller/transceiver specs, pin mappings, wiring guidance, and sample Seeed-studio usage snippet.
 - `docs/MCP_SETUP.md`
-  - MCP configuration guide describing how Cursor/Codex can expose the local docs folder via `mcp.json` plus pointers to the GVRET/Arduino/MCP references.
+  - MCP configuration guide describing how Cursor/Codex can expose the local docs folder via `mcp.json` plus pointers to the Arduino/MCP references.
 - `docs/MCP2515-CAN-Controller-with-SPI-20001801J.pdf`
   - Microchip MCP2515 stand-alone CAN controller datasheet (SPI commands, register map, timing formulas) used for low-level driver development.
 - `docs/LAWICEL_CAN232_Manual.pdf`
@@ -79,8 +77,6 @@
 ## Planning files (`docs/plans/`)
 - `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md`
   - Prioritized backlog of reliability, telemetry, and diagnostics improvements (watchdog, logging, filtering, etc.); README now highlights the work already completed so this document can focus on remaining work.
-- `docs/plans/gvret-filtering-plan.md`
-  - Draft thinking around GVRET filtering configuration; moved here for consistency, content unchanged.
 - `docs/plans/lawicel-filtering-plan.md`
   - Draft thinking around LAWICEL filtering configuration; moved here for consistency, content unchanged.
 
@@ -88,9 +84,9 @@
 - `src/arduino-canbus-monitor.ino`
   - Entry point that initializes serial/CAN, registers the MCP interrupt handler, applies optional custom filters, and forwards `loop`/`serialEvent` to `Can232`.
 - `src/can-232.h`
-  - Declaration of the `Can232` singleton, LAWICEL/GVRET command constants, circular RX buffer configuration, EEPROM keys, helper `HexHelper`, and firmware configuration macros.
+  - Declaration of the `Can232` singleton, LAWICEL command constants, circular RX buffer configuration, EEPROM keys, helper `HexHelper`, and firmware configuration macros.
 - `src/can-232.cpp`
-  - Implementation of the LAWICEL/GVRET state machines, buffering, filtering, EEPROM persistence, diagnostic `i` command, GVRET handshake, auto-polling, and telemetry exposed to `g_canStats`.
+  - Implementation of the LAWICEL state machines, buffering, filtering, EEPROM persistence, diagnostic `i` command, auto-polling, and telemetry exposed to `g_canStats`.
 - `src/mcp_can.cpp`
   - Seeed Studio MCP_CAN driver: SPI helpers, CAN controller initialization, message I/O, error checking, buffer management, and hardware filter setup.
 - `src/mcp_can.h`

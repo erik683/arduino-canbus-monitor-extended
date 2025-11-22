@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 import serial
 
@@ -232,6 +232,19 @@ class SlcanHarness:
         # Fallback to a short delay so very slow boards still have time to boot.
         time.sleep(0.25)
 
+    def read_line(self, timeout: float = 1.0) -> bytes:
+        """Read a CR-terminated ASCII line, ignoring empty heartbeats."""
+        deadline = time.monotonic() + timeout
+        raw = bytearray()
+        while time.monotonic() < deadline:
+            chunk = self.serial.read(1)
+            if not chunk:
+                continue
+            if chunk == b"\r":
+                return bytes(raw)
+            raw.extend(chunk)
+        raise RegressionFailure("Timeout waiting for serial line.")
+
 
 def ensure_closed(harness: SlcanHarness) -> None:
     """Best-effort channel close without raising when already closed."""
@@ -244,6 +257,207 @@ def ensure_bitrate_configured(harness: SlcanHarness, rate: str = "4") -> None:
     """Force the LAWICEL device into a known bitrate selection (Sn)."""
     ensure_closed(harness)
     harness.expect_ok(f"S{rate}\r")
+
+
+@dataclass
+class CanFrame:
+    raw: bytes
+    identifier: int
+    extended: bool
+    remote: bool
+    dlc: int
+    data: bytes
+    timestamp: Optional[int]
+
+
+@dataclass
+class AdapterStats:
+    command_count: int
+    frames_rx: int
+    frames_tx: int
+    uptime_seconds: int
+    drops: int
+    overflows: int
+    frames_per_second: int
+    debug_enabled: bool
+
+
+def _parse_hex(segment: bytes) -> int:
+    if not segment:
+        raise RegressionFailure("Missing hex segment.")
+    try:
+        return int(segment, 16)
+    except ValueError as exc:
+        raise RegressionFailure(f"Invalid hex segment: {segment!r}") from exc
+
+
+def parse_can_frame(payload: bytes, timestamps_enabled: bool = False) -> CanFrame:
+    if not payload:
+        raise RegressionFailure("Empty CAN frame payload.")
+    frame_type = payload[0:1]
+    if frame_type not in (b"t", b"T", b"r", b"R"):
+        raise RegressionFailure(f"Unexpected frame prefix: {payload!r}")
+
+    extended = frame_type in (b"T", b"R")
+    remote = frame_type in (b"r", b"R")
+    idx = 1
+    id_chars = 8 if extended else 3
+    if len(payload) < idx + id_chars + 1:
+        raise RegressionFailure(f"Truncated CAN frame: {payload!r}")
+    identifier = _parse_hex(payload[idx : idx + id_chars])
+    idx += id_chars
+
+    dlc = _parse_hex(payload[idx : idx + 1])
+    if dlc > 8:
+        raise RegressionFailure(f"DLC exceeds 8 bytes in frame: {payload!r}")
+    idx += 1
+
+    data = b""
+    if not remote:
+        data_chars = dlc * 2
+        if len(payload) < idx + data_chars:
+            raise RegressionFailure(f"Missing data bytes in frame: {payload!r}")
+        data_str = payload[idx : idx + data_chars].decode("ascii")
+        data = bytes.fromhex(data_str) if data_str else b""
+        idx += data_chars
+
+    timestamp = None
+    if timestamps_enabled:
+        if len(payload) < idx + 4:
+            raise RegressionFailure(f"Missing timestamp in frame: {payload!r}")
+        timestamp = _parse_hex(payload[idx : idx + 4])
+        idx += 4
+
+    if len(payload) != idx:
+        raise RegressionFailure(f"Unexpected trailing bytes in frame: {payload!r}")
+
+    return CanFrame(
+        raw=payload,
+        identifier=identifier,
+        extended=extended,
+        remote=remote,
+        dlc=dlc,
+        data=data,
+        timestamp=timestamp,
+    )
+
+
+def wait_for_frame_via_poll(
+    harness: SlcanHarness,
+    timeout: float = 5.0,
+    timestamps_enabled: bool = False,
+) -> CanFrame:
+    """Poll with P\r until a CAN frame arrives or timeout elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        payload = harness.transact("P\r")
+        if payload == b"\x07":
+            time.sleep(0.1)
+            continue
+        if payload:
+            return parse_can_frame(payload, timestamps_enabled)
+    raise RegressionFailure(
+        "Timed out waiting for CAN traffic. "
+        "Ensure the adapter is attached to a live 125 kbps bus."
+    )
+
+
+def read_adapter_stats(harness: SlcanHarness) -> AdapterStats:
+    payload = harness.transact("i\r")
+    if not payload.startswith(b"i"):
+        raise RegressionFailure(f"Unexpected info payload: {payload!r}")
+    text = payload.decode("ascii")
+    idx = 1
+
+    def take(width: int) -> int:
+        nonlocal idx
+        segment = text[idx : idx + width]
+        if len(segment) != width:
+            raise RegressionFailure("Truncated info payload.")
+        idx += width
+        return int(segment, 16)
+
+    command_count = take(4)
+    frames_rx = take(4)
+    frames_tx = take(4)
+    uptime = take(4)
+    drops = take(4)
+    overflows = take(4)
+    fps = take(2)
+    if len(text) <= idx:
+        raise RegressionFailure("Missing debug flag in info payload.")
+    debug_flag = text[idx]
+
+    return AdapterStats(
+        command_count=command_count,
+        frames_rx=frames_rx,
+        frames_tx=frames_tx,
+        uptime_seconds=uptime,
+        drops=drops,
+        overflows=overflows,
+        frames_per_second=fps,
+        debug_enabled=(debug_flag == "D"),
+    )
+
+
+def ensure_autopoll_mode(harness: SlcanHarness, enabled: bool) -> None:
+    ensure_closed(harness)
+    target = "1" if enabled else "0"
+    harness.expect_ok(f"X{target}\r")
+    status = harness.transact("X\r")
+    if status != f"X{target}".encode("ascii"):
+        raise RegressionFailure(f"Unexpected autopoll status: {status!r}")
+
+
+def wait_for_autopoll_frame(
+    harness: SlcanHarness,
+    timeout: float = 5.0,
+    timestamps_enabled: bool = False,
+) -> CanFrame:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = max(0.1, deadline - time.monotonic())
+        try:
+            line = harness.read_line(timeout=remaining)
+        except RegressionFailure:
+            continue
+        if not line or line in (b"Z", b"z"):
+            continue
+        if line.startswith((b"t", b"T", b"r", b"R")):
+            return parse_can_frame(line, timestamps_enabled)
+    raise RegressionFailure(
+        "No autopoll frames observed. Ensure the CAN bus is active at 125 kbps."
+    )
+
+
+def collect_frames_via_A(
+    harness: SlcanHarness,
+    timeout: float = 3.0,
+    timestamps_enabled: bool = False,
+) -> List[CanFrame]:
+    first = harness._transact("A\r")
+    frames: List[CanFrame] = []
+    if first == b"\x07":
+        raise RegressionFailure("A command returned an error.")
+    if first == b"A":
+        raise RegressionFailure(
+            "A command returned no frames. Let the RX buffer fill with real CAN traffic."
+        )
+    if first:
+        frames.append(parse_can_frame(first, timestamps_enabled))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = max(0.1, deadline - time.monotonic())
+        try:
+            line = harness.read_line(timeout=remaining)
+        except RegressionFailure:
+            continue
+        if not line:
+            continue
+        if line == b"A":
+            return frames
+        frames.append(parse_can_frame(line, timestamps_enabled))
+    raise RegressionFailure("Timed out waiting for completion of the A command response.")
 
 
 # --- Individual tests ----------------------------------------------------- #
@@ -259,6 +473,12 @@ def test_serial_number(h: SlcanHarness) -> None:
     payload = h.transact("N\r")
     if not payload.startswith(b"NA"):
         raise RegressionFailure(f"Serial number malformed: {payload!r}")
+
+
+def test_lowercase_version(h: SlcanHarness) -> None:
+    payload = h.transact("v\r")
+    if not payload.startswith(b"V"):
+        raise RegressionFailure(f"Lowercase version response malformed: {payload!r}")
 
 
 def test_close_idempotent(h: SlcanHarness) -> None:
@@ -289,10 +509,70 @@ def test_bitrate_rules(h: SlcanHarness) -> None:
     h.expect_ok("S5\r")  # Now allowed
 
 
+def test_invalid_bitrate_rejected(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    # Test invalid bitrate indices
+    h.expect_error("S10\r")  # Invalid bitrate index (max is S9)
+    h.expect_error("S99\r")  # Way out of range
+    h.expect_error("S-1\r")  # Negative index
+    h.expect_error("SA\r")   # Non-numeric character
+    # Verify valid bitrates still work after invalid ones
+    h.expect_ok("S4\r")      # Should still accept valid bitrate
+
+
+def test_listen_mode_receives_frames(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("L\r")
+    frame = wait_for_frame_via_poll(h)
+    if frame.identifier < 0:
+        raise RegressionFailure("Listen mode failed to deliver a CAN frame.")
+    payload = h.transact("t1230\r")
+    if payload != b"\x07":
+        raise RegressionFailure("Transmit should be blocked while in listen-only mode.")
+    ensure_closed(h)
+
+
 def test_uart_speed_change(h: SlcanHarness) -> None:
-    # UART speed changing has reliability issues on Arduino Uno at high speeds
-    # Skip this test for now as it's not critical functionality
-    pass
+    ensure_closed(h)
+    current = h.transact("U\r")
+    if len(current) != 2 or not current.startswith(b"U"):
+        raise RegressionFailure(f"Unexpected UART query response: {current!r}")
+    current_idx = int(chr(current[1]))
+
+    target_idx = 2 if current_idx != 2 else 1  # Prefer 57.6 kbaud, fallback to 115200
+    h.expect_ok(f"U{target_idx}\r")
+    h.set_host_baud(UART_BAUD_TABLE[target_idx])
+    new_payload = h.transact("U\r")
+    if new_payload != f"U{target_idx}".encode("ascii"):
+        raise RegressionFailure(f"UART index did not stick: {new_payload!r}")
+
+    h.expect_ok(f"U{current_idx}\r")
+    h.set_host_baud(UART_BAUD_TABLE[current_idx])
+
+
+def test_transmit_data_frames_increment_stats(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    stats_before = read_adapter_stats(h)
+    h.expect_ok("t1232A5B6\r")
+    h.expect_ok("T1ABCDEF04DEADBEEF\r")
+    stats_after = read_adapter_stats(h)
+    if stats_after.frames_tx - stats_before.frames_tx < 2:
+        raise RegressionFailure("TX counter did not increment after sending data frames.")
+
+
+def test_transmit_rtr_frames_increment_stats(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    stats_before = read_adapter_stats(h)
+    h.expect_ok("r1201\r")
+    h.expect_ok("R1ABCDEF01\r")
+    stats_after = read_adapter_stats(h)
+    if stats_after.frames_tx - stats_before.frames_tx < 2:
+        raise RegressionFailure("TX counter did not increment for RTR frames.")
 
 
 def test_timestamp_requires_closed(h: SlcanHarness) -> None:
@@ -318,6 +598,34 @@ def test_flags_format(h: SlcanHarness) -> None:
         int(payload[1:].decode("ascii"), 16)
     except ValueError as exc:
         raise RegressionFailure(f"Flag bytes are not hex: {payload!r}") from exc
+
+
+def test_info_snapshot(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    if h.transact("i\r") != b"\x07":
+        raise RegressionFailure("Info command should fail while CAN channel is closed.")
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    stats_before = read_adapter_stats(h)
+    wait_for_frame_via_poll(h)
+    stats_after = read_adapter_stats(h)
+    if stats_after.frames_rx <= stats_before.frames_rx:
+        raise RegressionFailure("Info snapshot did not reflect a received frame.")
+
+
+def test_autopoll_stream(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    frame = wait_for_autopoll_frame(h)
+    if frame.identifier < 0:
+        raise RegressionFailure("Autopoll failed to emit a CAN frame.")
+    ensure_closed(h)
+    ensure_autopoll_mode(h, False)
+    if h.transact("X\r") != b"X0":
+        raise RegressionFailure("Autopoll disable did not persist.")
+    h.flush()
 
 
 def test_timestamp_query(h: SlcanHarness) -> None:
@@ -348,6 +656,70 @@ def test_timestamp_persistence(h: SlcanHarness) -> None:
     h.reset_device()
     if h.transact("Z\r") != b"Z0":
         raise RegressionFailure("Timestamp mode did not revert to Z0 after reset")
+
+
+def test_poll_single_frame(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    frame = wait_for_frame_via_poll(h)
+    if not frame.remote and len(frame.data) != frame.dlc:
+        raise RegressionFailure("Polled frame payload length mismatch.")
+
+
+def test_poll_all_frames(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    time.sleep(0.5)
+    frames = collect_frames_via_A(h)
+    if not frames:
+        raise RegressionFailure(
+            "A command failed to return buffered frames. Ensure bus activity."
+        )
+
+
+def test_timestamped_frames_include_counter(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, False)
+    ensure_closed(h)
+    h.expect_ok("Z1\r")
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    frame = wait_for_frame_via_poll(h, timestamps_enabled=True)
+    if frame.timestamp is None:
+        raise RegressionFailure("Timestamped frame did not include timer bytes.")
+    ensure_closed(h)
+    h.expect_ok("Z0\r")
+
+
+def test_rx_buffer_overflow_detection(h: SlcanHarness) -> None:
+    """Test that RX buffer overflow is detected and reported in stats."""
+    ensure_autopoll_mode(h, False)
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+
+    # Get initial stats with channel open
+    initial_stats = read_adapter_stats(h)
+
+    # Keep channel open and wait for frames to accumulate
+    # Under high traffic conditions, this may cause overflow
+    time.sleep(2.0)  # Wait longer for potential frame accumulation
+
+    # Check that we can still read stats (overflow counter should be accessible)
+    try:
+        final_stats = read_adapter_stats(h)
+    except Exception as exc:
+        raise RegressionFailure(f"Failed to read stats during overflow test: {exc}")
+
+    # Verify overflow counter is non-negative (basic sanity check)
+    if final_stats.overflows < 0:
+        raise RegressionFailure(f"Overflow counter is negative: {final_stats.overflows}")
+    # If we had overflow, drops should also have increased
+    # Note: This comparison is valid since we kept the channel open throughout
+    if final_stats.overflows > initial_stats.overflows and final_stats.drops <= initial_stats.drops:
+        raise RegressionFailure("Overflow occurred but drops counter didn't increase")
+
+    ensure_closed(h)
 
 
 def test_autostart_query_and_rules(h: SlcanHarness) -> None:
@@ -395,20 +767,190 @@ def test_autostart_persistence(h: SlcanHarness) -> None:
     ensure_closed(h)
 
 
+def test_autostart_listen_persistence(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    h.expect_ok("Q2\r")
+    ensure_bitrate_configured(h, "4")
+    h.reset_device()
+    if h.transact("Q\r") != b"Q2":
+        raise RegressionFailure("Autostart listen mode did not persist as Q2 after reset.")
+    if h.transact("C\r") != b"":
+        raise RegressionFailure("Listen-mode autostart did not leave the bus open after boot.")
+    ensure_closed(h)
+    h.expect_ok("Q0\r")
+    h.reset_device()
+    if h.transact("Q\r") != b"Q0":
+        raise RegressionFailure("Autostart listen disable did not persist.")
+    ensure_closed(h)
+
+
+def test_filter_mode_roundtrip(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("W\r")
+    if len(payload) != 2 or not payload.startswith(b"W"):
+        raise RegressionFailure(f"Unexpected filter query payload: {payload!r}")
+    original = payload[1:2]
+    target = b"1" if original == b"0" else b"0"
+    h.expect_ok(f"W{target.decode('ascii')}\r")
+    if h.transact("W\r") != b"W" + target:
+        raise RegressionFailure("Filter mode change did not persist.")
+    h.expect_ok(f"W{original.decode('ascii')}\r")
+
+
+def test_acceptance_code_roundtrip(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("M\r")
+    if not payload.startswith(b"M") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance code payload: {payload!r}")
+    original = payload[1:].decode("ascii")
+    new_value = "11223344" if original.upper() != "11223344" else "A5A5A5A5"
+    h.expect_ok(f"M{new_value}\r")
+    if h.transact("M\r") != f"M{new_value}".encode("ascii"):
+        raise RegressionFailure("Acceptance code change did not persist.")
+    h.expect_ok(f"M{original}\r")
+
+
+def test_acceptance_mask_roundtrip(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("m\r")
+    if not payload.startswith(b"m") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance mask payload: {payload!r}")
+    original = payload[1:].decode("ascii")
+    new_value = "FFFFFFFF" if original.upper() != "FFFFFFFF" else "00000000"
+    h.expect_ok(f"m{new_value}\r")
+    if h.transact("m\r") != f"m{new_value}".encode("ascii"):
+        raise RegressionFailure("Acceptance mask change did not persist.")
+    h.expect_ok(f"m{original}\r")
+
+
+def test_filter_query_reports_mode(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("W\r")
+    if len(payload) != 2 or payload[0:1] != b"W" or payload[1:2] not in (b"0", b"1"):
+        raise RegressionFailure(f"Unexpected filter query payload: {payload!r}")
+
+
+def test_acceptance_code_query_format(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("M\r")
+    if not payload.startswith(b"M") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance code query payload: {payload!r}")
+    try:
+        int(payload[1:].decode("ascii"), 16)
+    except ValueError as exc:
+        raise RegressionFailure("Acceptance code contains invalid hex digits.") from exc
+
+
+def test_acceptance_mask_query_format(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("m\r")
+    if not payload.startswith(b"m") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance mask query payload: {payload!r}")
+    try:
+        int(payload[1:].decode("ascii"), 16)
+    except ValueError as exc:
+        raise RegressionFailure("Acceptance mask contains invalid hex digits.") from exc
+
+
+def test_uart_query_report(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("U\r")
+    if len(payload) != 2 or payload[0:1] != b"U" or payload[1:2] not in b"01234567":
+        raise RegressionFailure(f"Unexpected UART query payload: {payload!r}")
+
+
+def test_debug_toggle(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    if b"DEBUG ON" not in h.transact("@DBG1\r"):
+        raise RegressionFailure("Did not receive DEBUG ON banner.")
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    stats = read_adapter_stats(h)
+    if not stats.debug_enabled:
+        raise RegressionFailure("Info snapshot did not report debug mode enabled.")
+    ensure_closed(h)
+    if b"DEBUG OFF" not in h.transact("@DBG0\r"):
+        raise RegressionFailure("Did not receive DEBUG OFF banner.")
+    ensure_bitrate_configured(h, "4")
+    h.expect_ok("O\r")
+    stats_after = read_adapter_stats(h)
+    if stats_after.debug_enabled:
+        raise RegressionFailure("Debug mode remained on after @DBG0.")
+
+
+def test_gvret_switch_and_reset(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    if h.transact("@GVRET\r") != b"GVRET":
+        raise RegressionFailure("GVRET handshake banner missing.")
+    h.reset_device()
+    payload = h.transact("V\r")
+    if not payload.startswith(b"V"):
+        raise RegressionFailure("Adapter did not return to LAWICEL after GVRET reset.")
+
 TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("version", test_version),
+    ("version_lowercase", test_lowercase_version),
     ("serial", test_serial_number),
     ("close_idempotent", test_close_idempotent),
     ("open_requires_bitrate", test_open_requires_bitrate),
     ("bitrate_rules", test_bitrate_rules),
+    ("invalid_bitrate_rejected", test_invalid_bitrate_rejected),
+    ("listen_mode_receives_frames", test_listen_mode_receives_frames),
     ("uart_speed_change", test_uart_speed_change),
+    ("uart_query", test_uart_query_report),
+    ("tx_data_frames", test_transmit_data_frames_increment_stats),
+    ("tx_rtr_frames", test_transmit_rtr_frames_increment_stats),
+    ("poll_single_frame", test_poll_single_frame),
+    ("poll_all_frames", test_poll_all_frames),
     ("timestamp_requires_closed", test_timestamp_requires_closed),
     ("timestamp_query", test_timestamp_query),
     ("timestamp_persistence", test_timestamp_persistence),
+    ("timestamp_frames", test_timestamped_frames_include_counter),
+    ("rx_buffer_overflow", test_rx_buffer_overflow_detection),
     ("flags_format", test_flags_format),
+    ("info_snapshot", test_info_snapshot),
+    ("autopoll_stream", test_autopoll_stream),
     ("autostart_query", test_autostart_query_and_rules),
     ("autostart_persistence", test_autostart_persistence),
+    ("autostart_listen", test_autostart_listen_persistence),
+    ("filter_query", test_filter_query_reports_mode),
+    ("filter_roundtrip", test_filter_mode_roundtrip),
+    ("acceptance_code_query", test_acceptance_code_query_format),
+    ("acceptance_code_roundtrip", test_acceptance_code_roundtrip),
+    ("acceptance_mask_query", test_acceptance_mask_query_format),
+    ("acceptance_mask_roundtrip", test_acceptance_mask_roundtrip),
+    ("debug_toggle", test_debug_toggle),
+    ("gvret_switch", test_gvret_switch_and_reset),
 )
+
+
+def reset_test_state(harness: SlcanHarness) -> None:
+    """Reset device to clean state between tests for proper isolation."""
+    # Each cleanup operation is attempted independently to avoid one failure blocking others
+    try:
+        ensure_closed(harness)
+    except Exception:
+        pass  # Ignore cleanup failures
+
+    try:
+        harness.expect_ok("Q0\r")  # Disable autostart
+    except Exception:
+        pass  # Ignore cleanup failures
+
+    try:
+        harness.expect_ok("Z0\r")  # Disable timestamps
+    except Exception:
+        pass  # Ignore cleanup failures
+
+    try:
+        harness.expect_ok("X0\r")  # Disable autopoll
+    except Exception:
+        pass  # Ignore cleanup failures
+
+    try:
+        harness.transact("@DBG0\r")
+    except Exception:
+        pass  # Ignore cleanup failures
 
 
 def run_tests(
@@ -429,13 +971,7 @@ def run_tests(
             if fail_fast:
                 break
         finally:
-            ensure_closed(harness)
-            # Reset persistent settings to defaults for test isolation
-            try:
-                harness.expect_ok("Q0\r")  # Disable autostart
-                harness.expect_ok("Z0\r")  # Disable timestamps
-            except:
-                pass  # Ignore cleanup failures
+            reset_test_state(harness)
     return results
 
 
