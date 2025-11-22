@@ -20,6 +20,89 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-
   1301  USA
 */
+
+/*******************************************************************************
+ * FILE: mcp_can.cpp
+ * 
+ * DESCRIPTION:
+ * Implementation of the MCP_CAN class for controlling the Microchip MCP2515
+ * standalone CAN controller via SPI. This driver handles all low-level SPI
+ * communication, register access, bit timing configuration, message transmission
+ * and reception, and hardware filter setup.
+ * 
+ * IMPLEMENTATION STRUCTURE:
+ * 
+ * 1. LOW-LEVEL SPI OPERATIONS:
+ *    - mcp2515_reset(): Hardware reset via SPI command
+ *    - mcp2515_readRegister/S(): Read single or multiple registers
+ *    - mcp2515_setRegister/S(): Write single or multiple registers
+ *    - mcp2515_modifyRegister(): Atomic bit modification using BITMOD instruction
+ *    - mcp2515_readStatus(): Fast status read for RX/TX buffer state
+ *    - SPI helper macros: MCP2515_SELECT/UNSELECT for chip select control
+ * 
+ * 2. INITIALIZATION AND CONFIGURATION:
+ *    - begin(): Entry point for initialization (sets up SPI, calls mcp2515_init)
+ *    - mcp2515_init(): Full initialization sequence (reset, config mode, bit timing,
+ *      buffer init, interrupt setup, normal mode)
+ *    - mcp2515_configRate(): Bit timing configuration with large switch statement
+ *      covering all supported rates for both 8MHz and 16MHz crystals
+ *    - mcp2515_initCANBuffers(): Clear and initialize TX/RX buffers
+ *    - mcp2515_setCANCTRL_Mode(): Mode transitions with verification
+ * 
+ * 3. MESSAGE HANDLING:
+ *    - mcp2515_write_canMsg(): Format and load message into TX buffer
+ *    - mcp2515_read_canMsg(): Read message from RX buffer
+ *    - mcp2515_write_id/read_id(): CAN ID encoding/decoding for standard/extended
+ *    - sendMsg/sendMsgBuf(): Public transmit interface with timeout handling
+ *    - readMsg/readMsgBuf/readMsgBufID(): Public receive interface
+ *    - mcp2515_start_transmit(): Trigger transmission via TXREQ bit
+ *    - mcp2515_getNextFreeTXBuf(): Find available TX buffer (3 buffers supported)
+ * 
+ * 4. FILTERING AND MASKS:
+ *    - init_Mask(): Configure acceptance masks (2 masks: RXM0, RXM1)
+ *    - init_Filt(): Configure acceptance filters (6 filters: RXF0-RXF5)
+ *    - Mask/filter setup requires CONFIG mode, automatically transitions back
+ * 
+ * 5. STATUS AND DIAGNOSTICS:
+ *    - checkReceive(): Poll for pending messages in RX buffers
+ *    - checkError(): Read and interpret error flags (EFLG register)
+ *    - getInterruptFlags(): Expose CANINTF register for flag inspection
+ *    - getTxCtrlRegisters(): Read all TX buffer control registers
+ *    - isExtendedFrame/isRemoteRequest/getCanId(): Query message properties
+ *    - setMode(): Runtime mode changes (normal, listen-only, loopback, sleep)
+ * 
+ * 6. INTERNAL STATE MANAGEMENT:
+ *    - Internal message structure (m_nID, m_nDlc, m_nDta[], m_nExtFlg, m_nRtr)
+ *    - setMsg/clearMsg: Prepare internal message before transmission
+ * 
+ * KEY FEATURES:
+ * - Hardware SPI with configurable speed (uses SPI_CLOCK_DIV2 for maximum throughput)
+ * - Three transmit buffers with automatic selection of free buffer
+ * - Two receive buffers (RXB0, RXB1) with interrupt support
+ * - Full support for standard (11-bit) and extended (29-bit) identifiers
+ * - Remote transmission request (RTR) frame support
+ * - Comprehensive error detection and reporting
+ * - Timeout protection on all blocking operations
+ * - DEBUG_MODE compile-time option for serial diagnostics (disabled for SavvyCAN)
+ * 
+ * BIT TIMING:
+ * The configRate function contains extensive bit timing tables for precise CAN
+ * bus timing configuration. Proper bit timing is critical for reliable CAN
+ * communication and must match the bus speed and crystal frequency.
+ * 
+ * ROLE IN CODEBASE:
+ * This is the lowest-level hardware driver in the project. It provides a complete,
+ * self-contained MCP2515 driver that abstracts all hardware details from higher
+ * layers. The can-232.cpp module builds the LAWICEL protocol on top of this
+ * driver's clean object-oriented interface. The driver is portable and could be
+ * reused in other MCP2515-based CAN projects.
+ * 
+ * PERFORMANCE:
+ * - SPI clock runs at MCU_CLOCK/2 (8 MHz on 16 MHz Arduino)
+ * - Fast status read commands optimize polling performance
+ * - Automatic TX buffer selection minimizes transmit latency
+ * - Interrupt-driven RX improves response time when used with external interrupt
+ *******************************************************************************/
 #include "mcp_can.h"
 
 //#define DEBUG_MODE  // Disabled for SavvyCAN LAWICEL compatibility - eliminates MCP2515 diagnostic output

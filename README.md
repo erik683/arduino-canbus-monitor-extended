@@ -51,7 +51,7 @@ newgrp dialout
 ### Configuration
 - Board: Arduino Uno (change env in `platformio.ini`)
 - Libraries: Seeed-Studio CAN_BUS_Shield and `liquidcrystal_i2c` for the optional LCD
-- Receive buffering defaults to 64 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue for heavy traffic.
+- Receive buffering defaults to 64 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with (example) `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue for heavy traffic.
 
 ### Changing boards
 To use a different Arduino board, edit `platformio.ini`:
@@ -83,6 +83,17 @@ The suite exercises 12 core LAWICEL commands. See `tests/README.md` for details.
 - `Can232::updateBusLoad()` updates `currentFramesPerSecond` once per second.
 - Send the custom `i[CR]` LAWICEL command after opening the bus to dump a snapshot: `iCCCCRRRRTTTTUUUUddddooooFF` (hex-encoded counters for commands/RX/TX/uptime/drops/overflows plus the current FPS byte). The handler lives in `src/can-232.cpp`.
 - `src/lcd_display.cpp` drives an optional 16x2 I2C LCD. Line 1 shows a startup banner or status set via `LcdDisplay::updateStatus()`, while line 2 displays RX FPS. If no LCD is present the firmware runs normally.
+
+## Implemented Enhancements
+
+- LAWICEL commands share a `BufferedFrame` ring buffer (configured via `LW232_RX_BUFFER_SIZE`) so polls and auto-poll (`P`, `A`, `X`) all drain the same queue without drops when bursts arrive.
+- `HexHelper::parseNibble()` now consults the PROGMEM `HEX_LOOKUP_TABLE` instead of branching math, making frame parsing deterministic and lighter on CPU cycles.
+- Bus load telemetry data lives in `g_canStats`, feeds the optional LCD hook, and keeps drops/overflows counters accurate while the RX pipeline stays buffered.
+- The custom `i[CR]` command serializes runtime stats, letting hosts and terminals see uptime, counts, FPS, and debug mode without extra wiring.
+- The MCP2515 INT pin raises a lightweight ISR, which `Can232::loop()` drains before falling back to the polling path so non-interrupt shields still work while shields with INT pins gain lower latency.
+- Runtime debug tracing can be flipped on and off with `@DBG1[CR]`/`@DBG0[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1`), enabling verbose logs on-demand without reflashing.
+
+- Remaining enhancement ideas (watchdog timer, error tracking, rate limiting, hardware filtering, SPI tuning, etc.) live in `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md`.
 
 ## Protocol Coverage
 
@@ -173,7 +184,9 @@ sudo killall slcand
 ## Additional Documentation
 
 - `WSL_USB_SETUP.md` - detailed WSL2 USB device setup guide
-- `ENHANCEMENT_RECOMMENDATIONS.md` - future enhancement ideas and performance improvements
+- `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md` - outstanding roadmap items covering watchdog, error tracking, rate limiting, filtering, and SPI tuning; README now highlights the improvements already merged.
+- `docs/plans/gvret-filtering-plan.md` - draft ideas for GVRET filtering configuration (moved for consistency, no content changes).
+- `docs/plans/lawicel-filtering-plan.md` - draft ideas for LAWICEL filtering configuration (moved for consistency, no content changes).
 - `GIT_CHEATSHEET.md` - Git workflow reference for contributors
 - `tests/README.md` - regression test suite documentation
 - `legacy/README.md` - archived LCD diagnostics module (parallel HD44780) for drop-in use

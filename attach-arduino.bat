@@ -1,6 +1,6 @@
 @echo off
 echo Attaching Arduino Uno to WSL...
-echo Hardware ID: USB\VID_2341^&PID_0043\34331323735351C0F031
+echo Searching for Arduino Uno (VID:PID 2341:0043)
 echo.
 
 REM Check if running as administrator
@@ -18,12 +18,27 @@ echo Listing USB devices...
 usbipd list
 
 echo.
-echo Attaching Arduino Uno (BUSID will be auto-detected based on VID:PID 2341:0043)...
-echo If this fails, you may need to find the correct BUSID from the list above
-echo and modify this script to use: usbipd attach --busid YOUR_BUSID --wsl
+echo Searching for Arduino Uno (VID:PID 2341:0043)...
 
-REM Try to attach the Arduino Uno based on VID:PID
-usbipd attach --hardware-id "USB\VID_2341&PID_0043\34331323735351C0F031" --wsl
+REM Search for Arduino Uno by VID:PID and extract BUSID
+for /f "tokens=1" %%i in ('usbipd list ^| findstr "2341:0043"') do (
+    set BUSID=%%i
+    goto :found
+)
+
+REM If not found, show error
+echo Arduino Uno not found. Available devices listed above.
+echo Please make sure your Arduino is connected and recognized by Windows.
+echo You can also manually attach with: usbipd attach --busid YOUR_BUSID --wsl
+pause
+exit /b 1
+
+:found
+echo Found Arduino at BUSID: %BUSID%
+echo Attaching to WSL...
+
+REM Attach using the detected BUSID
+usbipd attach --busid %BUSID% --wsl
 
 if %errorLevel% == 0 (
     echo.

@@ -11,6 +11,32 @@
  * This library is free software. You may use/redistribute it under The MIT License terms.
  */
 
+/*******************************************************************************
+ * FILE: arduino-canbus-monitor.ino
+ * 
+ * DESCRIPTION:
+ * This is the main Arduino sketch file that serves as the entry point for the
+ * CAN bus monitor application. It provides a hardware interface between Arduino,
+ * the MCP2515 CAN controller shield, and a host computer running SavvyCAN or
+ * other LAWICEL-compatible software.
+ * 
+ * STRUCTURE AND FUNCTION:
+ * - setup(): Initializes serial communication, CAN interrupt handling, CAN bus
+ *   parameters (baud rate and clock), and runtime statistics
+ * - loop(): Main execution loop delegating to Can232::loop() for protocol handling
+ * - serialEvent(): Automatically called when serial data arrives, delegating to
+ *   Can232::serialEvent() for command parsing
+ * - handleCanInterrupt(): ISR callback for CAN message reception
+ * - myCustomAddressFilter(): Optional user-defined filter to reduce message traffic
+ *   by filtering based on CAN ID (currently configured for address 0x3d0)
+ * 
+ * ROLE IN CODEBASE:
+ * This file acts as the minimal glue code between Arduino's setup/loop model and
+ * the Can232 class which implements the full LAWICEL protocol. It configures
+ * hardware-specific settings (pins, interrupts, CAN speed, clock frequency) and
+ * delegates all protocol and communication logic to the modular Can232 implementation.
+ *******************************************************************************/
+
 #include <SPI.h>
 #include "mcp_can.h"
 #include "can-232.h"

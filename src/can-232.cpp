@@ -12,9 +12,78 @@
 *
 *****************************************************************************************/
 
+/*******************************************************************************
+ * FILE: can-232.cpp
+ * 
+ * DESCRIPTION:
+ * Implementation file for the Can232 class, providing full LAWICEL CAN232 v1.3
+ * ASCII protocol and SavvyCAN GVRET binary protocol support. This is the core
+ * of the CAN bus monitor, handling all protocol commands, message buffering,
+ * filtering, and persistent configuration.
+ * 
+ * MAJOR FUNCTIONAL AREAS:
+ * 
+ * 1. INITIALIZATION & CONFIGURATION:
+ *    - EEPROM persistence and migration (timestamp, autostart, CAN speed)
+ *    - Hardware filter configuration for MCP2515 (masks/filters)
+ *    - Serial baud rate switching (with safe scheduling mechanism)
+ *    - Auto-start mode for power-on CAN channel opening
+ * 
+ * 2. COMMAND PROCESSING (parseAndRunCommand):
+ *    - S: CAN bitrate selection (0-9: 10k to 1000k, plus 83.3k)
+ *    - O/L: Open channel (normal/listen-only mode)
+ *    - C: Close channel
+ *    - t/T: Transmit standard/extended CAN frames
+ *    - r/R: Transmit standard/extended RTR frames
+ *    - P/A: Poll single/all pending frames
+ *    - F: Read MCP2515 status flags
+ *    - X: Auto-poll mode toggle
+ *    - W/M/m: Hardware filter configuration
+ *    - U: UART baud rate change
+ *    - V/N: Version and serial number
+ *    - Z: Timestamp enable/disable
+ *    - Q: Autostart configuration
+ *    - i: Runtime diagnostics (custom extension)
+ *    - @: Debug mode and GVRET protocol switch
+ * 
+ * 3. DUAL PROTOCOL SUPPORT:
+ *    - LAWICEL: ASCII text protocol (loopLawicel, parseAndRunCommand)
+ *    - GVRET: Binary protocol (loopGvret, processGvretByte, state machine)
+ *    - Automatic protocol detection via handshake bytes
+ *    - Protocol-specific frame emission (emitFrameToSerial vs emitFrameToGvret)
+ * 
+ * 4. MESSAGE BUFFERING & FILTERING:
+ *    - Circular RX buffer with configurable size
+ *    - Interrupt-driven CAN frame reception (serviceCanRx)
+ *    - User-defined software filters (checkPassFilter)
+ *    - Hardware filters (MCP2515 masks/filters)
+ *    - Overflow detection and statistics tracking
+ * 
+ * 5. RUNTIME MONITORING:
+ *    - Bus load calculation (frames per second)
+ *    - TX/RX counters, buffer drops, command count
+ *    - MCP2515 error flag reading and reporting
+ * 
+ * STRUCTURE:
+ * The Can232 class uses the singleton pattern with static interface methods
+ * delegating to a private instance. State machines handle serial input parsing
+ * for both LAWICEL (stringComplete flag) and GVRET (GvretRxState enum). The
+ * main loop() function services the CAN RX buffer and emits frames according
+ * to the selected protocol and auto-poll settings.
+ * 
+ * ROLE IN CODEBASE:
+ * This file is the application logic layer, coordinating between:
+ * - arduino-canbus-monitor.ino (setup/loop/ISR glue code)
+ * - mcp_can.cpp (low-level MCP2515 SPI driver)
+ * - runtime_stats.cpp (statistics tracking)
+ * - Serial port (host computer communication)
+ * - EEPROM (persistent configuration storage)
+ *******************************************************************************/
+
 #include <SPI.h>
 #include <EEPROM.h>
 #include <avr/pgmspace.h>
+#include <string.h>
 #include "mcp_can.h"
 #include "can-232.h"
 #include "runtime_stats.h"
@@ -71,6 +140,31 @@ static inline INT8U readHexLookup(INT8U c) {
 static inline void emitHex16(unsigned long value) {
     HexHelper::printFullByte((value >> 8) & 0xFF);
     HexHelper::printFullByte(value & 0xFF);
+}
+
+static bool parseHexBytes(const INT8U* input, size_t byteCount, INT8U* output) {
+    for (size_t idx = 0; idx < byteCount; idx++) {
+        bool ok = false;
+        output[idx] = HexHelper::parseFullByte(input[idx * 2], input[idx * 2 + 1], &ok);
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static INT32U decodeSjaStdId(INT8U high, INT8U low) {
+    // ACR/AMR layout: high = ID10..ID3, low bits 7..5 = ID2..ID0
+    return ((((INT32U)high) << 3) | (((INT32U)low) >> 5)) & 0x7FF;
+}
+
+static INT32U decodeSjaExtId(const INT8U* bytes) {
+    // Map 4 ACR/AMR bytes into a 29-bit identifier/mask
+    INT32U id = ((INT32U)bytes[0] << 21) |
+                ((INT32U)bytes[1] << 13) |
+                ((INT32U)bytes[2] << 5)  |
+                ((INT32U)bytes[3] >> 3);
+    return id & 0x1FFFFFFF;
 }
 
 static INT32U baudIndexToBps(INT8U idx);
@@ -146,6 +240,10 @@ void Can232::initFunc() {
     lw232PendingSerialBaudIndex = 0xFF;
     // Channel stays closed until host selects a bitrate (LAWICEL default).
     lw232BitrateConfigured = false;
+    lw232FilterMode = 0x00;
+    memset(lw232AcceptanceCode, 0, sizeof(lw232AcceptanceCode));
+    memset(lw232AcceptanceMask, 0, sizeof(lw232AcceptanceMask));
+    lw232HwFilterDirty = true;
 
     clearRxBuffer();
     maybeAutoStart();
@@ -764,13 +862,69 @@ INT8U Can232::parseAndRunCommand() {
     }
     case LW232_CMD_FILTER:
         // Wn[CR] Filter mode setting. By default CAN232 works in dual filter mode (0) and is backwards compatible with previous CAN232 versions.
-        ret = LW232_ERR_NOT_IMPLEMENTED; break;
-    case LW232_CMD_ACC_CODE:
-        // Mxxxxxxxx[CR] Sets Acceptance Code Register (ACn Register of SJA1000). // we use MCP2515,
-        ret = LW232_ERR_NOT_IMPLEMENTED; break;
-    case LW232_CMD_ACC_MASK:
+        // Supports query when called without an argument (returns W0/W1).
+        {
+            const INT8U modeChar = lw232Message[1];
+            const bool hasArgument = (modeChar != LW232_CR && modeChar != 0);
+            if (!hasArgument) {
+                Serial.print(LW232_CMD_FILTER);
+                Serial.print(lw232FilterMode ? LW232_ON_ONE : LW232_OFF);
+                break;
+            }
+            if (payloadLen != 2 || (modeChar != LW232_OFF && modeChar != LW232_ON_ONE)) {
+                ret = LW232_ERR;
+                break;
+            }
+            if (lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+                ret = LW232_ERR;
+                break;
+            }
+            lw232FilterMode = (modeChar == LW232_ON_ONE) ? 0x01 : 0x00;
+            markHardwareFiltersDirty();
+        }
+        break;
+    case LW232_CMD_ACC_CODE: {
+        // Mxxxxxxxx[CR] Sets Acceptance Code Register (ACn Register of SJA1000).
+        const bool hasArgument = (payloadLen > 1);
+        if (!hasArgument) {
+            Serial.print(LW232_CMD_ACC_CODE);
+            for (INT8U idx = 0; idx < 4; idx++) {
+                HexHelper::printFullByte(lw232AcceptanceCode[idx]);
+            }
+            break;
+        }
+        if (payloadLen != 9 || lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+            break;
+        }
+        if (!parseHexBytes(lw232Message + 1, 4, lw232AcceptanceCode)) {
+            ret = LW232_ERR;
+            break;
+        }
+        markHardwareFiltersDirty();
+        break;
+    }
+    case LW232_CMD_ACC_MASK: {
         // mxxxxxxxx[CR] Sets Acceptance Mask Register (AMn Register of SJA1000).
-        ret = LW232_ERR_NOT_IMPLEMENTED; break;
+        const bool hasArgument = (payloadLen > 1);
+        if (!hasArgument) {
+            Serial.print(LW232_CMD_ACC_MASK);
+            for (INT8U idx = 0; idx < 4; idx++) {
+                HexHelper::printFullByte(lw232AcceptanceMask[idx]);
+            }
+            break;
+        }
+        if (payloadLen != 9 || lw232CanChannelMode != LW232_STATUS_CAN_CLOSED) {
+            ret = LW232_ERR;
+            break;
+        }
+        if (!parseHexBytes(lw232Message + 1, 4, lw232AcceptanceMask)) {
+            ret = LW232_ERR;
+            break;
+        }
+        markHardwareFiltersDirty();
+        break;
+    }
     case LW232_CMD_UART: {
         // Un[CR] Setup UART with a new baud rate where n is 0-7. Bare U[CR] reports the current selection.
         const INT8U modeChar = lw232Message[1];
@@ -1225,6 +1379,60 @@ INT8U Can232::checkPassFilter(INT32U addr) {
 	return (*userAddressFilterFunc)(addr);
 }
 
+void Can232::markHardwareFiltersDirty() {
+    lw232HwFilterDirty = true;
+}
+
+bool Can232::applyHardwareFilters(INT8U targetMode) {
+#ifndef _MCP_FAKE_MODE_
+    const bool singleMode = (lw232FilterMode != 0);
+
+    // Decode standard filters and masks
+    const INT32U stdFilter0 = decodeSjaStdId(lw232AcceptanceCode[0], lw232AcceptanceCode[1]);
+    const INT32U stdFilter1 = decodeSjaStdId(lw232AcceptanceCode[2], lw232AcceptanceCode[3]);
+    const INT32U stdMask0 = decodeSjaStdId(lw232AcceptanceMask[0], lw232AcceptanceMask[1]);
+    const INT32U stdMask1 = decodeSjaStdId(lw232AcceptanceMask[2], lw232AcceptanceMask[3]);
+
+    // Decode extended filter and mask
+    const INT32U extFilter = decodeSjaExtId(lw232AcceptanceCode);
+    const INT32U extMask = decodeSjaExtId(lw232AcceptanceMask);
+
+    INT8U status = MCP2515_OK;
+
+    if (singleMode) {
+        // Single mode: focus on extended ID filtering with duplicated filters for coverage
+        status |= lw232CAN.init_Mask(0, 1, extMask);
+        status |= lw232CAN.init_Mask(1, 1, extMask);
+        for (INT8U f = 0; f < 6; f++) {
+            status |= lw232CAN.init_Filt(f, 1, extFilter);
+        }
+    } else {
+        // Dual mode: two standard masks with filters distributed correctly
+        status |= lw232CAN.init_Mask(0, 0, stdMask0);
+        status |= lw232CAN.init_Mask(1, 0, stdMask1);
+        // Filters 0-1 controlled by RXM0 (stdMask0)
+        status |= lw232CAN.init_Filt(0, 0, stdFilter0);
+        status |= lw232CAN.init_Filt(1, 0, stdFilter0);
+        // Filters 2-5 controlled by RXM1 (stdMask1)
+        status |= lw232CAN.init_Filt(2, 0, stdFilter1);
+        status |= lw232CAN.init_Filt(3, 0, stdFilter1);
+        status |= lw232CAN.init_Filt(4, 0, stdFilter1);
+        status |= lw232CAN.init_Filt(5, 0, stdFilter1);
+    }
+
+    lw232CAN.setMode(targetMode);
+    lw232HwFilterDirty = (status != MCP2515_OK);
+    if (status != MCP2515_OK) {
+        dbg1("MCP2515 filter programming failed with status " + String(status));
+    }
+    return status == MCP2515_OK;
+#else
+    (void)targetMode;
+    lw232HwFilterDirty = false;
+    return true;
+#endif
+}
+
 INT8U Can232::openCanBus(INT8U mode) {
     INT8U ret = LW232_OK;
     INT8U initStatus = CAN_OK;
@@ -1233,12 +1441,18 @@ INT8U Can232::openCanBus(INT8U mode) {
 #ifndef _MCP_FAKE_MODE_
     initStatus = lw232CAN.begin(lw232CanSpeedSelection, lw232McpModuleClock);
     if (initStatus == CAN_OK) {
-        lw232CAN.setMode(mode);
+        markHardwareFiltersDirty(); // Controller reset during begin() clears filters
+        if (!applyHardwareFilters(mode)) {
+            initStatus = CAN_FAILINIT;
+            dbg1("CAN filter init failed");
+        } else {
+            dbg1("CAN initialized successfully");
+        }
     } else {
         dbg2("CAN init failed with status=", initStatus);
     }
 #else
-    (void)mode;
+    lw232HwFilterDirty = false;
 #endif
     if (initStatus != CAN_OK) {
         ret = LW232_ERR;

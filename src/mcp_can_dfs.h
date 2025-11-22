@@ -21,6 +21,77 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-
   1301  USA
 */
+
+/*******************************************************************************
+ * FILE: mcp_can_dfs.h
+ * 
+ * DESCRIPTION:
+ * Comprehensive definitions file (dfs = definitions) for the MCP2515 CAN
+ * controller. Contains all register addresses, bit masks, SPI commands,
+ * configuration values, and symbolic constants needed for low-level hardware
+ * operations. Originally from Seeed Studio MCP_CAN library.
+ * 
+ * MAJOR DEFINITION GROUPS:
+ * 
+ * 1. DATA TYPE DEFINITIONS:
+ *    - INT8U, INT16U, INT32U: Platform-independent unsigned integer types
+ *    - Used throughout the driver for consistent sizing
+ * 
+ * 2. MCP2515 REGISTER MAP:
+ *    - All register addresses (0x00-0x7F range)
+ *    - RX/TX buffer registers (RXB0, RXB1, TXB0, TXB1, TXB2)
+ *    - Filter registers (RXF0-RXF5, RXM0-RXM1)
+ *    - Configuration registers (CNF1-3, CANCTRL, CANINTE, CANINTF, EFLG)
+ *    - Control registers for each buffer and operational state
+ * 
+ * 3. BIT MASKS AND FLAGS:
+ *    - CANCTRL mode bits (MODE_NORMAL, MODE_LISTENONLY, MODE_LOOPBACK, etc.)
+ *    - Interrupt flags (MCP_RX0IF, MCP_RX1IF, MCP_TX0IF, etc.)
+ *    - Error flags (MCP_EFLG_RX0OVR, MCP_EFLG_TXBO, MCP_EFLG_EWARN, etc.)
+ *    - TX buffer control bits (MCP_TXB_TXREQ_M, MCP_TXB_MLOA_M, etc.)
+ *    - RX buffer control bits (MCP_RXB_RX_ANY, MCP_RXB_RX_STDEXT, etc.)
+ * 
+ * 4. SPI INSTRUCTION SET:
+ *    - Command opcodes (MCP_WRITE, MCP_READ, MCP_BITMOD, MCP_RESET, etc.)
+ *    - Optimized buffer load/read commands
+ *    - Status read commands
+ * 
+ * 5. BIT TIMING CONFIGURATION:
+ *    - CNF1/CNF2/CNF3 register values for various baud rates
+ *    - Separate tables for 16MHz and 8MHz crystal oscillators
+ *    - Supports: 5k, 10k, 20k, 31.25k, 33k, 40k, 50k, 80k, 83.3k, 95k,
+ *                100k, 125k, 200k, 250k, 500k, 1000k bps
+ *    - Extended support added for 8MHz configurations
+ * 
+ * 6. CAN BIT RATE SYMBOLIC CONSTANTS:
+ *    - CAN_5KBPS through CAN_1000KBPS
+ *    - CAN_83K3BPS for special 83.3 kbps rate
+ *    - Used for portable baud rate selection
+ * 
+ * 7. RETURN CODE DEFINITIONS:
+ *    - CAN_OK, CAN_FAILINIT, CAN_FAILTX, etc.
+ *    - MCP2515_OK, MCP2515_FAIL
+ *    - Used for error handling throughout the driver
+ * 
+ * 8. TIMING AND CONFIGURATION:
+ *    - SPI timing constants
+ *    - Timeout values for transmit operations
+ *    - Buffer management constants
+ * 
+ * ROLE IN CODEBASE:
+ * This file serves as the single source of truth for all MCP2515 hardware
+ * constants. It is included by both mcp_can.h and mcp_can.cpp, ensuring
+ * consistent register access and configuration across the driver. The extensive
+ * bit timing tables support a wide range of CAN networks and crystal
+ * frequencies, making the driver highly portable. The symbolic constants
+ * improve code readability and maintainability by avoiding magic numbers.
+ * 
+ * USAGE:
+ * - Included by mcp_can.h (inherited by all users of MCP_CAN class)
+ * - Register addresses used in all SPI read/write operations
+ * - Bit masks used for register modification operations
+ * - Configuration values used during initialization and mode changes
+ *******************************************************************************/
 #ifndef _MCP2515DFS_H_
 #define _MCP2515DFS_H_
 

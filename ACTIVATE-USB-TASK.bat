@@ -3,8 +3,13 @@ echo ========================================
 echo WSL USB Auto-Attach Task Setup
 echo ========================================
 echo.
-echo This will create a Windows Task Scheduler task to automatically
-echo attach your Arduino (BUSID 1-8) to WSL when you log in.
+echo *** DEPRECATED: This script uses a hardcoded BUSID (1-8) ***
+echo *** Use setup-windows-task.bat instead for better compatibility ***
+echo.
+echo This legacy script will create a Windows Task Scheduler task to
+echo automatically attach an Arduino at BUSID 1-8 to WSL when you log in.
+echo.
+echo For a more flexible setup, use: setup-windows-task.bat
 echo.
 echo You need to run this as Administrator!
 echo.

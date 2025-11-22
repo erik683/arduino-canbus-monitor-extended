@@ -20,6 +20,57 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-
   1301  USA
 */
+
+/*******************************************************************************
+ * FILE: mcp_can.h
+ * 
+ * DESCRIPTION:
+ * Header file for the MCP_CAN class providing high-level interface to the
+ * Microchip MCP2515 CAN controller via SPI. This library originally from
+ * Seeed Studio has been adapted for use in the arduino-canbus-monitor project.
+ * 
+ * CLASS STRUCTURE - MCP_CAN:
+ * 
+ * PUBLIC INTERFACE:
+ *    - Constructor: MCP_CAN(CS_pin) - Initialize with chip select pin
+ *    - begin(): Initialize CAN controller with specified baud rate and clock
+ *    - init_Mask/init_Filt(): Configure hardware acceptance filters
+ *    - sendMsgBuf(): Transmit CAN frames (standard/extended, RTR support)
+ *    - readMsgBufID(): Read received CAN frame with ID
+ *    - checkReceive(): Poll for available messages
+ *    - checkError(): Read error flags from MCP2515
+ *    - getCanId/isRemoteRequest/isExtendedFrame(): Query received frame properties
+ *    - setMode(): Change MCP2515 operating mode
+ *    - getInterruptFlags/getTxCtrlRegisters(): Diagnostic register access
+ * 
+ * PRIVATE LOW-LEVEL FUNCTIONS:
+ *    - mcp2515_reset/readRegister/setRegister/modifyRegister: SPI register access
+ *    - mcp2515_setCANCTRL_Mode: Mode control (normal, listen-only, loopback, config)
+ *    - mcp2515_configRate: Bit timing configuration for various baud rates
+ *    - mcp2515_write_id/read_id: CAN identifier encoding/decoding
+ *    - mcp2515_write_canMsg/read_canMsg: Message buffer operations
+ *    - mcp2515_getNextFreeTXBuf: Find available TX buffer
+ * 
+ * INTERNAL STATE:
+ *    - m_nID: CAN identifier of last received message
+ *    - m_nDlc: Data length code
+ *    - m_nDta[]: 8-byte data payload
+ *    - m_nExtFlg: Extended frame flag
+ *    - m_nRtr: Remote transmission request flag
+ *    - SPICS: Chip select pin number
+ * 
+ * ROLE IN CODEBASE:
+ * This is the hardware abstraction layer for the MCP2515 CAN controller. It
+ * provides a clean object-oriented interface to the CAN hardware, hiding all
+ * SPI communication details and register-level operations. The can-232.cpp
+ * module uses this class to perform all CAN operations (init, send, receive,
+ * configure filters). The driver supports both 8MHz and 16MHz crystal
+ * oscillators and a wide range of CAN bit rates from 5kbps to 1Mbps.
+ * 
+ * DEPENDENCIES:
+ * - mcp_can_dfs.h: All MCP2515 register definitions, bit masks, and constants
+ * - Arduino SPI library: Hardware SPI communication
+ *******************************************************************************/
 #ifndef _MCP2515_H_
 #define _MCP2515_H_
 

@@ -8,47 +8,7 @@ All recommendations maintain **100% LAWICEL spec compliance** and remain compati
 
 ---
 
-## ✅ Completed Enhancements
-
-### C1. Buffered Receive Queue & Auto-Poll Stability
-- `src/can-232.h` now declares a `BufferedFrame` struct plus a 64-slot circular buffer (`LW232_RX_BUFFER_SIZE`, configurable at build time).
-- `serviceCanRx()`/`pushRxFrame()` in `src/can-232.cpp` aggressively drain the MCP2515 FIFOs, increment `g_canStats.rxBufferDrops/rxBufferOverflows` on pressure, and let `receiveSingleFrame()` pop frames for both manual polls and auto-poll (`X1`).
-- Auto-polling therefore shares the exact same buffered pipeline as `P` and `A`, which prevents bursts from starving slower serial links.
-
-**Impact**: Reliable behavior up to the 64-frame backlog, easier performance tuning via a single macro, and deterministic stats when a host cannot consume frames fast enough.
-
-### C2. PROGMEM Hex Lookup Table
-- `HexHelper::parseNibble()` now consults the `HEX_LOOKUP_TABLE` stored in PROGMEM (`src/can-232.cpp:30-80`) instead of branching math.
-- All frame parsing (IDs, DLC, payload, and LAWICEL command arguments) benefits from consistent timing and drastically lower CPU utilization.
-
-**Impact**: 5-10× faster hex parsing, fewer jitter-induced overruns, and smaller code paths (only 256 bytes of Flash).
-
-### C3. Bus Load Telemetry & LCD Hook
-- `Can232::updateBusLoad()` updates `g_canStats.currentFramesPerSecond` once per second. Drops/overflows counters live in `src/runtime_stats.cpp`.
-- `src/lcd_display.cpp` drives an optional 16x2 I²C LCD (PCF8574 @ `0x27`) and prints the computed RX frames per second without involving the host PC.
-- The telemetry plumbing is reusable for future diagnostics (host commands, LEDs, etc.) because all data is exposed via `g_canStats`.
-
-**Impact**: Built-in observability: you can see whether the adapter is keeping up at a glance, log FPS remotely, and build richer diagnostics on top of the stats subsystem.
-
-### C4. Runtime Info Command
-- Added custom LAWICEL command `i[CR]` that serializes the most important counters from `g_canStats` (commands, RX/TX frames, uptime, buffer drops, overflows, current FPS, and debug mode) while the CAN channel is open.
-- Response format is `iCCCCRRRRTTTTUUUUddddooooFFD[CR]` (`D` = debug on, `d` = debug off), making it trivial for host tools to gather adapter health without leaving protocol mode.
-
-**Impact**: Host applications (or a quick serial terminal) can watch buffer pressure and bus load in real time without extra wiring or firmware tweaks.
-
-### C5. Interrupt-Driven CAN Reception
-- The MCP2515 INT line (wired to Arduino `D2` on the Inland shield) now raises a lightweight ISR that flags pending CAN frames.
-- `Can232::loop()` consumes the flag, drains the MCP2515 FIFOs immediately, and falls back to the original polling path if no interrupt was observed (so third-party boards without an INT jumper still function).
-- Stats counters for drops/overflows continue to work unchanged because `serviceCanRx()` and the buffered pipeline are still the single ingestion point.
-
-**Impact**: Dramatically lower latency under heavy bus load, less CPU time wasted on blind polling, and no hardware changes for shield users.
-
-### C6. Runtime Debug Toggle & High-Detail Logging
-- Introduced optional `@DBG1[CR]` / `@DBG0[CR]` commands (opt-in via `ENABLE_CAN_DEBUG_LOGGING`) to flip verbose tracing at runtime without reflashing.
-- Debug logs capture command parsing, CAN initialization status, RX/TX results, buffer pressure, and MCP2515 error flags while keeping the default firmware silent.
-- Diagnostic command `i[CR]` now reports debug state so host scripts can confirm whether tracing is active.
-
-**Impact**: Rapid on-vehicle troubleshooting—flip verbose logging on when behaviour diverges, correlate issues with MCP2515 state, and switch back to silent mode instantly.
+> Implementation notes for the completed enhancements (buffered RX queue, PROGMEM hex parsing, telemetry/LCD output, `i[CR]` diagnostics, interrupt-driven reception, and runtime debug toggles) now live in the main `README.md`, so this document focuses on the outstanding recommendations below.
 
 ---
 

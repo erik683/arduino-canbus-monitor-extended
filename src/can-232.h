@@ -11,6 +11,47 @@
 *
 *****************************************************************************************/
 
+/*******************************************************************************
+ * FILE: can-232.h
+ * 
+ * DESCRIPTION:
+ * Header file defining the Can232 class and associated constants for implementing
+ * the LAWICEL CAN232/CANUSB ASCII protocol. This file also includes support for
+ * the SavvyCAN GVRET binary protocol, making the adapter compatible with both
+ * text-based and binary CAN monitoring applications.
+ * 
+ * KEY COMPONENTS:
+ * 
+ * 1. PROTOCOL DEFINITIONS:
+ *    - LAWICEL command codes (S, O, L, C, t, T, r, R, P, A, F, X, W, M, m, U, V, N, Z, Q)
+ *    - GVRET binary protocol opcodes and structures
+ *    - Command parameters, return codes, frame formats, and buffer sizes
+ * 
+ * 2. Can232 CLASS:
+ *    - Singleton pattern managing all protocol state and CAN communication
+ *    - Public static interface: init(), setFilter(), loop(), serialEvent()
+ *    - BufferedFrame structure for queuing received CAN messages
+ *    - Circular RX buffer (configurable size via LW232_RX_BUFFER_SIZE)
+ *    - State machine for LAWICEL and GVRET protocol parsing
+ * 
+ * 3. CONFIGURATION CONSTANTS:
+ *    - Baud rate tables for serial UART (0-7) and CAN bus (0-9)
+ *    - Default settings (115200 serial, 500 kbps CAN, 16 MHz MCP2515 clock)
+ *    - Pin assignments (CS pin 10, INT pin 2)
+ *    - EEPROM addresses for persistent settings (timestamp, autostart)
+ * 
+ * 4. HexHelper CLASS:
+ *    - Utility functions for hex/ASCII conversion in LAWICEL protocol
+ *    - Optimized nibble parsing with lookup table
+ * 
+ * ROLE IN CODEBASE:
+ * This header defines the interface contract for LAWICEL/GVRET protocol handling.
+ * It bridges the Arduino sketch (arduino-canbus-monitor.ino), MCP2515 CAN driver
+ * (mcp_can.h/cpp), and runtime statistics (runtime_stats.h/cpp). All command
+ * parsing, frame buffering, filtering, EEPROM persistence, and dual-protocol
+ * support are coordinated through the Can232 class declared here.
+ *******************************************************************************/
+
 
 #ifndef _CAN_232_H_
 #define _CAN_232_H_
@@ -275,6 +316,12 @@ private:
     INT8U lw232CanChannelMode = LW232_STATUS_CAN_CLOSED;
     INT8U lw232LastErr = LW232_OK;
 
+    // Hardware acceptance filtering (LAWICEL W/M/m)
+    INT8U lw232FilterMode = 0x00;                // 0 = dual (default), 1 = single
+    INT8U lw232AcceptanceCode[4] = {0, 0, 0, 0}; // Raw SJA1000-style bytes
+    INT8U lw232AcceptanceMask[4] = {0, 0, 0, 0}; // Raw SJA1000-style bytes
+    bool lw232HwFilterDirty = true;
+
     INT8U lw232AutoStart = LW232_AUTOSTART_OFF;
     INT8U lw232AutoPoll  = LW232_AUTOPOLL_OFF;
     INT8U lw232TimeStamp = LW232_TIMESTAMP_OFF;
@@ -358,6 +405,8 @@ private:
     void clearRxBuffer();
     bool pushRxFrame(const BufferedFrame& frame);
     bool popRxFrame(BufferedFrame& frame);
+    void markHardwareFiltersDirty();
+    bool applyHardwareFilters(INT8U targetMode);
 
     INT8U isExtendedFrame();
     INT8U checkPassFilter(INT32U addr);
