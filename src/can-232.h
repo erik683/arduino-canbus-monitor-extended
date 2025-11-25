@@ -288,8 +288,6 @@ private:
     INT8U lw232AutoStart = LW232_AUTOSTART_OFF;
     INT8U lw232AutoPoll  = LW232_AUTOPOLL_OFF;
     INT8U lw232TimeStamp = LW232_TIMESTAMP_OFF;
-    bool lw232DebugMode = false;
-    bool lw232DebugExtFrames = false;
     bool lw232RejectExtendedFrames = false;
 
     INT32U lw232CanId = 0;

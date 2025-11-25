@@ -17,38 +17,6 @@
 #include "can-232.h"
 #include "runtime_stats.h"
 
-#ifndef ENABLE_CAN_DEBUG_LOGGING
-#define ENABLE_CAN_DEBUG_LOGGING 0
-#endif
-
-#if ENABLE_CAN_DEBUG_LOGGING
-#define LOGGING_ENABLED
-#endif
-
-#ifdef LOGGING_ENABLED
-#define dbg_begin(x) debug.begin(x)
-#define dbg0(x)   debug.print(x)
-#define dbg1(x)   debug.println(x)
-#define dbg2(x,y) debug.print(x); debug.println(y)
-#define dbgH(x)   debug.print(x,HEX)
-#define DEBUG_RX_PIN 8
-#define DEBUG_TX_PIN 9
-#else
-#define dbg_begin(x)
-#define dbg0(x) 
-#define dbg1(x) 
-#define dbg2(x,y)
-#define dbgH(x)
-#endif
-
-#ifdef LOGGING_ENABLED
-    // software serial #2: TX = digital pin 8, RX = digital pin 9
-    // on the Mega, use other pins instead, since 8 and 9 don't work on the Mega
-  
-      SoftwareSerial debug(DEBUG_RX_PIN, DEBUG_TX_PIN);
-  //#define debug Serial
-#endif
-
 // Singleton instance - intentionally uses new() without delete() for embedded systems
 // where memory is managed throughout the program lifecycle
 Can232* Can232::_instance = 0;
@@ -60,9 +28,6 @@ Can232* Can232::instance() {
 }
 
 void Can232::init(INT8U defaultCanSpeed, const INT8U clock) {
-    dbg_begin(LW232_DEFAULT_BAUD_RATE); // logging through software serial 
-    dbg1("CAN ASCII. Welcome to debug");
-
     instance()->lw232CanSpeedSelection = defaultCanSpeed;
     instance()->lw232CanSpeedIndex = findCanBaudIndex(defaultCanSpeed);
     instance()->lw232McpModuleClock = clock;
@@ -84,7 +49,6 @@ void Can232::serialEvent() {
 
 void Can232::initFunc() {
     if (!inputString.reserve(LW232_INPUT_STRING_BUFFER_SIZE)) {
-        dbg0("inputString.reserve failed in initFunc. less optimal String work is expected");
     }
 
     // Initialize EEPROM to defaults if not properly set - MUST be first
@@ -211,7 +175,6 @@ void Can232::notifyCanInterrupt() {
 }
 
 INT8U Can232::exec() {
-    dbg2("Command received:", inputString);
     statsRecordCommand();
     lw232LastErr = parseAndRunCommand();
     switch (lw232LastErr) {
@@ -690,33 +653,6 @@ INT8U Can232::parseAndRunCommand() {
         }
         break;
     }
-    case LW232_CMD_DEBUG: {
-        // @DBGn[CR] Runtime debug toggle (0=off, 1=on)
-        if (strlen((char*)lw232Message) >= 5 && lw232Message[1] == 'D' && lw232Message[2] == 'B' && lw232Message[3] == 'G') {
-            if (lw232Message[4] == '1') {
-                lw232DebugMode = true;
-                Serial.print("DEBUG ON\r");
-            } else if (lw232Message[4] == '0') {
-                lw232DebugMode = false;
-                Serial.print("DEBUG OFF\r");
-            } else {
-                ret = LW232_ERR;
-            }
-        } else {
-            ret = LW232_ERR;
-        }
-        break;
-    }
-    case LW232_CMD_DEBUG_EXT: {
-        // #EXT[CR] Show raw registers for next extended frame
-        if (strlen((char*)lw232Message) >= 4 && lw232Message[1] == 'E' && lw232Message[2] == 'X' && lw232Message[3] == 'T') {
-            lw232DebugExtFrames = true;
-            Serial.print("EXTENDED FRAME DEBUG ON\r");
-        } else {
-            ret = LW232_ERR;
-        }
-        break;
-    }
     case LW232_CMD_REJECT_EXT: {
         // %EXTn[CR] Reject extended frames (0=accept, 1=reject)
         if (strlen((char*)lw232Message) >= 5 && lw232Message[1] == 'E' && lw232Message[2] == 'X' && lw232Message[3] == 'T') {
@@ -735,7 +671,7 @@ INT8U Can232::parseAndRunCommand() {
         break;
     }
     case LW232_CMD_INFO: {
-        // i[CR] Diagnostic snapshot: iCCCCRRRRTTTTUUUUddddooooFFD
+        // i[CR] Diagnostic snapshot: iCCCCRRRRTTTTUUUUddddooooFF
         if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
             ret = LW232_ERR;
             break;
@@ -762,8 +698,6 @@ INT8U Can232::parseAndRunCommand() {
         HexHelper::printFullByte(HIGH_BYTE(LOW_WORD(g_canStats.rxBufferOverflows)));
         // Print FPS (2 hex digits)
         HexHelper::printFullByte(LOW_BYTE(g_canStats.currentFramesPerSecond));
-        // Print debug flag
-        Serial.print(lw232DebugMode ? 'D' : '0');
         break;
     }
     case LW232_CMD_YANK: {
@@ -1020,14 +954,12 @@ void Can232::initializeEepromIfNeeded() {
                 findCanBaudIndex(LW232_DEFAULT_CAN_RATE)
             ));
 
-            dbg1("EEPROM autostart block corrupted, reinitialized");
         }
     } else {
         // Check if this is old format (timestamp stored at address 0x00)
         const INT8U oldTimestamp = EEPROM.read(LW232_EEPROM_ADDR_MAGIC); // Was 0x00 in old format
         if (oldTimestamp == LW232_TIMESTAMP_OFF || oldTimestamp == LW232_TIMESTAMP_ON_NORMAL) {
             // Old format detected - migrate to new format
-            dbg1("Migrating EEPROM from old format");
 
             // Move timestamp from 0x00 to 0x01
             EEPROM.write(LW232_EEPROM_ADDR_TIMESTAMP, oldTimestamp);
@@ -1044,12 +976,8 @@ void Can232::initializeEepromIfNeeded() {
 
             // Write magic marker to indicate new format
             EEPROM.write(LW232_EEPROM_ADDR_MAGIC, LW232_EEPROM_MAGIC_VALUE);
-
-            dbg1("EEPROM migration completed");
         } else {
             // Neither new format nor old format - initialize to defaults
-            dbg1("EEPROM uninitialized - setting defaults");
-
             // Write magic marker
             EEPROM.write(LW232_EEPROM_ADDR_MAGIC, LW232_EEPROM_MAGIC_VALUE);
 
@@ -1121,23 +1049,11 @@ void Can232::loadAutoStartPreference() {
     if (versionValid && checksumValid && modeValid && indexValid) {
         lw232AutoStart = storedMode;
         lw232CanSpeedIndex = storedIndex;
-        dbg2("Loaded autostart from EEPROM: mode=", storedMode);
     } else {
         // Validation failed - use defaults and log issue
         lw232AutoStart = LW232_AUTOSTART_OFF;
         lw232CanSpeedIndex = findCanBaudIndex(LW232_DEFAULT_CAN_RATE);
 
-        // Log validation failures for debugging
-        if (!versionValid) {
-            dbg2("EEPROM autostart version invalid: ", version);
-        } else if (!checksumValid) {
-            dbg2("EEPROM autostart checksum invalid: ", checksum);
-            dbg2("Expected: ", expectedChecksum);
-        } else if (!modeValid) {
-            dbg2("EEPROM autostart mode invalid: ", storedMode);
-        } else if (!indexValid) {
-            dbg2("EEPROM autostart index invalid: ", storedIndex);
-        }
     }
 }
 
@@ -1268,15 +1184,12 @@ bool Can232::parseCanExtId() {
 void HexHelper::printFullByte(INT8U b) {
     if (b < 0x10) {
         Serial.print('0');
-       // dbg0('0');
     }
     Serial.print(b, HEX);
-    //dbgH(b);
 }
 
 void HexHelper::printNibble(INT8U b) {
     Serial.print(b & 0x0F, HEX);
-    //dbgH(b & 0x0F);
 }
 
 
@@ -1361,20 +1274,6 @@ Can232::RxReadStatus Can232::readCanFrame(BufferedFrame& frame) {
         frame.timestamp = capturedMicros;
         frame.len = len;
         frame.flags = isExtendedFrame() ? LW232_FRAME_FLAG_EXTENDED : 0;
-
-        // Debug extended frames if requested (before rejection check)
-        if ((frame.flags & LW232_FRAME_FLAG_EXTENDED) && lw232DebugExtFrames) {
-            Serial.print("[EXT_DEBUG] Extended frame detected - ID: 0x");
-            Serial.print(id, HEX);
-            Serial.print(" Data: ");
-            for (int i = 0; i < len; i++) {
-                HexHelper::printFullByte(buf[i]);
-            }
-            Serial.print(" Length: ");
-            Serial.print(len);
-            Serial.print("\r\n");
-            lw232DebugExtFrames = false; // Only show once
-        }
 
         // Reject extended frames if configured to do so
         if ((frame.flags & LW232_FRAME_FLAG_EXTENDED) && lw232RejectExtendedFrames) {
