@@ -26,7 +26,7 @@ This folder contains everything you need to move onto a Windows laptop and perfo
    python run_full_suite.py --port COM3
    ```
 
-   Use `--baud 115200` if you need a different UART speed and `--fail-fast` if you only want the first failing test. Logs default to `field-suite.log`.
+   Use `--baud 500000` if you need a different UART speed and `--fail-fast` if you only want the first failing test. Logs default to `field-suite.log`.
 
 4. After the run completes, copy `field-suite.log` and the console output to your report. The log includes timestamps, pass/fail results, and any error messages for quick triage.
 

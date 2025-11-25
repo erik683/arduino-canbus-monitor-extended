@@ -332,6 +332,10 @@
 #define MCP_16MHz_500kBPS_CFG2 (0xF0)
 #define MCP_16MHz_500kBPS_CFG3 (0x86)
 
+#define MCP_16MHz_800kBPS_CFG1 (0x00)
+#define MCP_16MHz_800kBPS_CFG2 (0xCA)
+#define MCP_16MHz_800kBPS_CFG3 (0x07)
+
 #define MCP_16MHz_250kBPS_CFG1 (0x41)
 #define MCP_16MHz_250kBPS_CFG2 (0xF1)
 #define MCP_16MHz_250kBPS_CFG3 (0x85)
@@ -404,6 +408,10 @@
 #define MCP_8MHz_500kBPS_CFG1 (0x00)
 #define MCP_8MHz_500kBPS_CFG2 (0x90)
 #define MCP_8MHz_500kBPS_CFG3 (0x02)
+
+#define MCP_8MHz_800kBPS_CFG1 (0x00)
+#define MCP_8MHz_800kBPS_CFG2 (0x80)
+#define MCP_8MHz_800kBPS_CFG3 (0x00)
 
 #define MCP_8MHz_250kBPS_CFG1 (0x00)
 #define MCP_8MHz_250kBPS_CFG2 (0xb1)
@@ -513,6 +521,7 @@
 #define CAN_200KBPS  13
 #define CAN_250KBPS  14
 #define CAN_500KBPS  15
+#define CAN_800KBPS  17
 #define CAN_1000KBPS 16
 
 #define CAN_OK                  (0)

@@ -1,0 +1,65 @@
+Field suite run @ 2025-11-22 10:17:25
+Port: /dev/ttyACM0
+Baud: 500000
+Environment:
+  timestamp: 2025-11-22T10:10:24.211563
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[FAIL] invalid_bitrate_rejected - Expected error bell for 'SA', got b''
+[PASS] listen_mode_receives_frames
+[PASS] uart_speed_change
+[PASS] uart_query
+[FAIL] tx_data_frames - Unexpected info payload: b'\x07'
+[FAIL] tx_rtr_frames - Unexpected info payload: b'\x07'
+[FAIL] poll_single_frame - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[FAIL] poll_all_frames - A command returned no frames. Let the RX buffer fill with real CAN traffic.
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[FAIL] timestamp_frames - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[FAIL] rx_buffer_overflow - Unexpected info payload: b'\x07'
+[PASS] flags_format
+[FAIL] info_snapshot - Unexpected info payload: b'\x07'
+[FAIL] autopoll_stream - No autopoll frames observed. Ensure the CAN bus is active at 125 kbps.
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[PASS] filter_query
+[FAIL] filter_roundtrip - Expected OK for 'W1', got b'\x07'
+[PASS] acceptance_code_query
+[FAIL] acceptance_code_roundtrip - Expected OK for 'M11223344', got b'\x07'
+[PASS] acceptance_mask_query
+[FAIL] acceptance_mask_roundtrip - Expected OK for 'm00000000', got b'\x07'
+[FAIL] debug_toggle - Unexpected info payload: b'\x07'
+------------------------------------------------------------
+Summary: 19/32 tests passed (59.4%)
+Total duration: 417.21 seconds
+Average test time: 13.04 seconds
+
+Failed tests:
+  - invalid_bitrate_rejected: Expected error bell for 'SA', got b''
+  - tx_data_frames: Unexpected info payload: b'\x07'
+  - tx_rtr_frames: Unexpected info payload: b'\x07'
+  - poll_single_frame: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - poll_all_frames: A command returned no frames. Let the RX buffer fill with real CAN traffic.
+  - timestamp_frames: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - rx_buffer_overflow: Unexpected info payload: b'\x07'
+  - info_snapshot: Unexpected info payload: b'\x07'
+  - autopoll_stream: No autopoll frames observed. Ensure the CAN bus is active at 125 kbps.
+  - filter_roundtrip: Expected OK for 'W1', got b'\x07'
+  - acceptance_code_roundtrip: Expected OK for 'M11223344', got b'\x07'
+  - acceptance_mask_roundtrip: Expected OK for 'm00000000', got b'\x07'
+  - debug_toggle: Unexpected info payload: b'\x07'
+

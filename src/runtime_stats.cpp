@@ -18,19 +18,17 @@
  * 3. STATISTICS FUNCTIONS:
  *    - statsReset(): Atomically clears all statistics counters using
  *      noInterrupts()/interrupts() to prevent race conditions during reset
- *    - statsRecordCommand(): Increments command counter (not atomic - called
- *      from main loop context only)
- *    - statsRecordRxFrame(): Increments RX counter and updates last RX time
- *    - statsRecordTxFrame(): Increments TX counter and updates last TX time
+ *    - statsRecordCommand(): Increments command counter (atomic via interrupt disable)
+ *    - statsRecordRxFrame(): Increments RX counter and updates last RX time (atomic)
+ *    - statsRecordTxFrame(): Increments TX counter and updates last TX time (atomic)
  *    - statsRecordRxDrop(): Increments drop counter when buffer is full
  *    - statsRecordRxOverflow(): Increments overflow event counter
  * 
  * THREAD SAFETY CONSIDERATIONS:
- * Most stat updates occur from the main loop, but RX stats may be updated from
- * interrupt context. The volatile qualifiers on CanRuntimeStats members ensure
- * visibility across contexts. statsReset() uses interrupt disabling for atomic
- * multi-field updates. Individual counter increments are atomic on AVR 8-bit
- * platforms for single-byte and word-sized variables.
+ * Most stat updates occur from the main loop. The volatile qualifiers on CanRuntimeStats
+ * members ensure visibility across contexts. statsReset() uses interrupt disabling for
+ * atomic multi-field updates. All counter increments use interrupt disabling to ensure
+ * atomicity of 32-bit operations on AVR 8-bit platforms.
  * 
  * ROLE IN CODEBASE:
  * Provides the implementation backing the diagnostics interface defined in
@@ -62,24 +60,34 @@ void statsReset() {
 }
 
 void statsRecordCommand() {
+    noInterrupts();
     g_canStats.commandCount++;
+    interrupts();
     writeMillis(g_canStats.lastCommandMillis);
 }
 
 void statsRecordRxFrame() {
+    noInterrupts();
     g_canStats.framesRx++;
+    interrupts();
     writeMillis(g_canStats.lastRxMillis);
 }
 
 void statsRecordTxFrame() {
+    noInterrupts();
     g_canStats.framesTx++;
+    interrupts();
     writeMillis(g_canStats.lastTxMillis);
 }
 
 void statsRecordRxDrop() {
+    noInterrupts();
     g_canStats.rxBufferDrops++;
+    interrupts();
 }
 
 void statsRecordRxOverflow() {
+    noInterrupts();
     g_canStats.rxBufferOverflows++;
+    interrupts();
 }

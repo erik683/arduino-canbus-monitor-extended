@@ -1,0 +1,43 @@
+Field suite run @ 2025-11-22 19:26:31
+Port: /dev/ttyACM1
+Baud: 500000
+Environment:
+  timestamp: 2025-11-22T19:21:48.305941
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+[PASS] listen_mode_receives_frames
+[PASS] uart_speed_change
+[PASS] uart_query
+[PASS] tx_data_frames
+[PASS] tx_rtr_frames
+[PASS] poll_single_frame
+[PASS] poll_all_frames
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[PASS] timestamp_frames
+[PASS] rx_buffer_overflow
+[PASS] flags_format
+[PASS] info_snapshot
+[FAIL] autopoll_stream - No autopoll frames observed. Ensure the CAN bus is active at 500 kbps.
+------------------------------------------------------------
+Summary: 21/22 tests passed (95.5%)
+Total duration: 279.10 seconds
+Average test time: 12.69 seconds
+
+Failed tests:
+  - autopoll_stream: No autopoll frames observed. Ensure the CAN bus is active at 500 kbps.
+

@@ -160,7 +160,7 @@ GND  ──────────── GND  ───────────
 MCP_CAN CAN(10);  // CS pin on D10
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(500000);
     
     // Initialize CAN bus at 500 kbps
     if(CAN.begin(CAN_500KBPS) == CAN_OK) {

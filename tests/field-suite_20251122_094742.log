@@ -1,0 +1,69 @@
+Field suite run @ 2025-11-22 09:53:29
+Port: /dev/ttyACM0
+Baud: 500000
+Environment:
+  timestamp: 2025-11-22T09:47:42.053702
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[FAIL] invalid_bitrate_rejected - Expected error bell for 'S10', got b''
+[FAIL] listen_mode_receives_frames - Unexpected autopoll status: b''
+[PASS] uart_speed_change
+[PASS] uart_query
+[FAIL] tx_data_frames - Unexpected autopoll status: b''
+[FAIL] tx_rtr_frames - Unexpected autopoll status: b''
+[FAIL] poll_single_frame - Unexpected autopoll status: b''
+[FAIL] poll_all_frames - Unexpected autopoll status: b''
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[FAIL] timestamp_frames - Unexpected autopoll status: b''
+[FAIL] rx_buffer_overflow - Unexpected autopoll status: b''
+[PASS] flags_format
+[FAIL] info_snapshot - Unexpected autopoll status: b''
+[FAIL] autopoll_stream - Unexpected autopoll status: b''
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[FAIL] filter_query - Unexpected filter query payload: b'\x07'
+[FAIL] filter_roundtrip - Unexpected filter query payload: b'\x07'
+[FAIL] acceptance_code_query - Unexpected acceptance code query payload: b'\x07'
+[FAIL] acceptance_code_roundtrip - Unexpected acceptance code payload: b'\x07'
+[FAIL] acceptance_mask_query - Unexpected acceptance mask query payload: b'\x07'
+[FAIL] acceptance_mask_roundtrip - Unexpected acceptance mask payload: b'\x07'
+[FAIL] debug_toggle - Did not receive DEBUG ON banner.
+------------------------------------------------------------
+Summary: 15/32 tests passed (46.9%)
+Total duration: 343.02 seconds
+Average test time: 10.72 seconds
+
+Failed tests:
+  - invalid_bitrate_rejected: Expected error bell for 'S10', got b''
+  - listen_mode_receives_frames: Unexpected autopoll status: b''
+  - tx_data_frames: Unexpected autopoll status: b''
+  - tx_rtr_frames: Unexpected autopoll status: b''
+  - poll_single_frame: Unexpected autopoll status: b''
+  - poll_all_frames: Unexpected autopoll status: b''
+  - timestamp_frames: Unexpected autopoll status: b''
+  - rx_buffer_overflow: Unexpected autopoll status: b''
+  - info_snapshot: Unexpected autopoll status: b''
+  - autopoll_stream: Unexpected autopoll status: b''
+  - filter_query: Unexpected filter query payload: b'\x07'
+  - filter_roundtrip: Unexpected filter query payload: b'\x07'
+  - acceptance_code_query: Unexpected acceptance code query payload: b'\x07'
+  - acceptance_code_roundtrip: Unexpected acceptance code payload: b'\x07'
+  - acceptance_mask_query: Unexpected acceptance mask query payload: b'\x07'
+  - acceptance_mask_roundtrip: Unexpected acceptance mask payload: b'\x07'
+  - debug_toggle: Did not receive DEBUG ON banner.
+

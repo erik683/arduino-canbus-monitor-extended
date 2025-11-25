@@ -29,7 +29,7 @@ Monitors serial output from the Arduino device in real-time.
 python scripts/serial_monitor.py
 
 # Specify port and baud rate
-python scripts/serial_monitor.py --port /dev/ttyACM0 --baud 115200
+python scripts/serial_monitor.py --port /dev/ttyACM0 --baud 500000
 
 # Log output to file
 python scripts/serial_monitor.py --log serial_output.log
@@ -43,7 +43,7 @@ python scripts/serial_monitor.py --no-timestamp
 
 **Options:**
 - `--port, -p`: Serial port path (default: auto-detect)
-- `--baud, -b`: Baud rate (default: 115200)
+- `--baud, -b`: Baud rate (default: 500000)
 - `--log, -l`: Log file path (optional)
 - `--no-timestamp`: Don't add timestamps
 - `--filter`: Filter lines (can be repeated)
@@ -70,7 +70,7 @@ python scripts/savvycan_automation.py --appimage /path/to/SavvyCAN.AppImage
 **Options:**
 - `--appimage`: Path to SavvyCAN AppImage (default: auto-detect)
 - `--port`: Serial port to connect (default: /dev/ttyACM0)
-- `--baud`: Baud rate (default: 115200)
+- `--baud`: Baud rate (default: 500000)
 - `--connect`: Attempt to connect to serial port after launch
 - `--screenshot`: Take screenshot and save to file
 
@@ -95,7 +95,7 @@ savvycan.type_text("Hello")
 savvycan.send_key("ctrl+o")
 
 # Connect to serial port
-savvycan.connect_serial("/dev/ttyACM0", 115200)
+savvycan.connect_serial("/dev/ttyACM0", 500000)
 
 # Take screenshot
 savvycan.screenshot("screenshot.png")
@@ -128,7 +128,7 @@ python scripts/run_savvycan_with_monitor.py --no-monitor
 
 **Options:**
 - `--port, -p`: Serial port (default: auto-detect)
-- `--baud, -b`: Baud rate (default: 115200)
+- `--baud, -b`: Baud rate (default: 500000)
 - `--appimage`: Path to SavvyCAN AppImage (default: auto-detect)
 - `--log`: Log serial output to file
 - `--filter`: Filter serial lines (can be repeated)
@@ -242,7 +242,7 @@ def test_sequence():
     time.sleep(3)
     
     # Connect to device
-    savvycan.connect_serial("/dev/ttyACM0", 115200)
+    savvycan.connect_serial("/dev/ttyACM0", 500000)
     time.sleep(2)
     
     # Take screenshot of initial state
@@ -251,7 +251,7 @@ def test_sequence():
     # Monitor serial in background
     monitor_proc = multiprocessing.Process(
         target=monitor_serial,
-        args=("/dev/ttyACM0", 115200, "test.log", None)
+        args=("/dev/ttyACM0", 500000, "test.log", None)
     )
     monitor_proc.start()
     
@@ -274,5 +274,11 @@ if __name__ == "__main__":
 - `../docs/WSL_GUI_AUTOMATION.md` - Complete WSL GUI automation guide
 - `../README.md` - Main project documentation
 - `../WSL_USB_SETUP.md` - USB device setup for WSL
+
+
+
+
+
+
 
 

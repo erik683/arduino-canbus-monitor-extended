@@ -67,10 +67,13 @@ void setup() {
     statsReset();
     Can232::init(CAN_125KBPS, MCP_16MHz); // set default rate you need here and clock frequency of CAN shield. Typically it is 16MHz, but on some MCP2515 + TJA1050 it is 8Mhz
 
-    // optional custom packet filter to reduce number of messages comingh through to canhacker
+    // Optional custom packet filter to reduce message traffic to host software.
+    // Uncomment the next line and modify myCustomAddressFilter() to filter specific CAN IDs.
     // Can232::setFilter(myCustomAddressFilter); 
 }
 
+// Example filter function - returns LW232_FILTER_PROCESS to allow message through,
+// or LW232_FILTER_SKIP to filter it out. Modify cases below for your needs.
 INT8U myCustomAddressFilter(INT32U addr) {
     INT8U ret = LW232_FILTER_SKIP; //LW232_FILTER_PROCESS or LW232_FILTER_SKIP
     switch(addr) {

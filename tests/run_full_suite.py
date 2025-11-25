@@ -247,7 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="Serial/SLCAN port (COMx on Windows).")
-    parser.add_argument("--baud", type=int, default=500000, help="UART baud rate.")
+    parser.add_argument("--baud", type=int, default=115200, help="UART baud rate.")
     parser.add_argument(
         "--log",
         default="field-suite.log",

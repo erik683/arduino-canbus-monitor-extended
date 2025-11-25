@@ -92,3 +92,11 @@ python3 "$SCRIPT_DIR/run_savvycan_with_monitor.py" \
     --log "can_traffic_$(date +%Y%m%d_%H%M%S).log"
 
 
+
+
+
+
+
+
+
+

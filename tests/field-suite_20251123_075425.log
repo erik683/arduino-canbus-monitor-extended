@@ -1,0 +1,53 @@
+Field suite run @ 2025-11-23 08:01:34
+Port: /dev/ttyACM1
+Baud: 115200
+Environment:
+  timestamp: 2025-11-23T07:54:25.347070
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+[PASS] listen_mode_receives_frames
+[PASS] uart_speed_change
+[PASS] uart_query
+[PASS] tx_data_frames
+[PASS] tx_rtr_frames
+[PASS] poll_single_frame
+[PASS] poll_all_frames
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[PASS] timestamp_frames
+[PASS] rx_buffer_overflow
+[PASS] flags_format
+[PASS] info_snapshot
+[FAIL] autopoll_stream - Timed out waiting for completion of the A command response.
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[PASS] filter_query
+[PASS] filter_roundtrip
+[PASS] acceptance_code_query
+[PASS] acceptance_code_roundtrip
+[PASS] acceptance_mask_query
+[PASS] acceptance_mask_roundtrip
+[PASS] debug_toggle
+------------------------------------------------------------
+Summary: 31/32 tests passed (96.9%)
+Total duration: 424.27 seconds
+Average test time: 13.26 seconds
+
+Failed tests:
+  - autopoll_stream: Timed out waiting for completion of the A command response.
+

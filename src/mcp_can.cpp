@@ -340,6 +340,12 @@ INT8U MCP_CAN::mcp2515_configRate(const INT8U canSpeed, const INT8U clock)
                     cfg3 = MCP_16MHz_500kBPS_CFG3;
                     break;
 
+                case (CAN_800KBPS) :
+                    cfg1 = MCP_16MHz_800kBPS_CFG1;
+                    cfg2 = MCP_16MHz_800kBPS_CFG2;
+                    cfg3 = MCP_16MHz_800kBPS_CFG3;
+                    break;
+
                 case (CAN_1000KBPS) :
                     cfg1 = MCP_16MHz_1000kBPS_CFG1;
                     cfg2 = MCP_16MHz_1000kBPS_CFG2;
@@ -444,6 +450,12 @@ INT8U MCP_CAN::mcp2515_configRate(const INT8U canSpeed, const INT8U clock)
                     cfg1 = MCP_8MHz_500kBPS_CFG1;
                     cfg2 = MCP_8MHz_500kBPS_CFG2;
                     cfg3 = MCP_8MHz_500kBPS_CFG3;
+                    break;
+
+                case (CAN_800KBPS) :
+                    cfg1 = MCP_8MHz_800kBPS_CFG1;
+                    cfg2 = MCP_8MHz_800kBPS_CFG2;
+                    cfg3 = MCP_8MHz_800kBPS_CFG3;
                     break;
 
                 case (CAN_1000KBPS) :
@@ -938,7 +950,7 @@ INT8U MCP_CAN::clearMsg()
     m_nExtFlg   = 0;
     m_nRtr      = 0;
     m_nfilhit   = 0;
-    for(int i = 0; i<m_nDlc; i++ )
+    for(int i = 0; i<MAX_CHAR_IN_MESSAGE; i++ )
       m_nDta[i] = 0x00;
 
     return MCP2515_OK;

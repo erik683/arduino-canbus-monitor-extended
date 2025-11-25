@@ -1,0 +1,113 @@
+Manual IRL Testing Log - 2025-11-22T18:49:01.823189
+Port: /dev/ttyACM0, Baud: 500000
+
+COMMAND HISTORY:
+--------------------------------------------------
+Version check: V
+Serial number: N
+Close channel: C
+Set bitrate: S4
+Open channel: O
+Disable autopoll: X0
+Single frame poll: P
+Bulk frame poll: A
+Listen mode: L
+Close: C
+Normal mode: O
+Enable timestamps: Z1
+Check timestamps: Z
+Enable autopoll: X1
+Check autopoll: X
+Close channel: C
+Filter mode query: W
+Set single filter: W1
+Verify single filter: W
+Set dual filter: W0
+Verify dual filter: W
+
+TEST RESULTS:
+--------------------------------------------------
+Command: V
+Description: Version check
+Response: 
+------------------------------
+Command: N
+Description: Serial number
+Response: NA666
+------------------------------
+Command: C
+Description: Close channel
+Response: [BEL]
+------------------------------
+Command: S4
+Description: Set bitrate
+Response: 
+------------------------------
+Command: O
+Description: Open channel
+Response: 
+------------------------------
+Command: X0
+Description: Disable autopoll
+Response: [BEL]
+------------------------------
+Command: P
+Description: Single frame poll
+Response: [BEL]V1013
+------------------------------
+Command: A
+Description: Bulk frame poll
+Response: [BEL][BEL]
+------------------------------
+Command: L
+Description: Listen mode
+Response: 
+------------------------------
+Command: C
+Description: Close
+Response: 
+------------------------------
+Command: O
+Description: Normal mode
+Response: 
+------------------------------
+Command: Z1
+Description: Enable timestamps
+Response: 
+------------------------------
+Command: Z
+Description: Check timestamps
+Response: V1013
+------------------------------
+Command: X1
+Description: Enable autopoll
+Response: 
+------------------------------
+Command: X
+Description: Check autopoll
+Response: 
+------------------------------
+Command: C
+Description: Close channel
+Response: 
+------------------------------
+Command: W
+Description: Filter mode query
+Response: W0
+------------------------------
+Command: W1
+Description: Set single filter
+Response: 
+------------------------------
+Command: W
+Description: Verify single filter
+Response: W1
+------------------------------
+Command: W0
+Description: Set dual filter
+Response: 
+------------------------------
+Command: W
+Description: Verify dual filter
+Response: 
+------------------------------

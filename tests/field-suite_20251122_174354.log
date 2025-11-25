@@ -1,0 +1,62 @@
+Field suite run @ 2025-11-22 17:50:54
+Port: /dev/ttyACM0
+Baud: 500000
+Environment:
+  timestamp: 2025-11-22T17:43:54.340302
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial[FAIL] listen_mode_receives_frames - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+[PASS] uart_speed_change
+[PASS] uart_query
+[FAIL] tx_data_frames - Expected OK for 't1232A5B6', got b'\x07'
+[FAIL] tx_rtr_frames - Expected OK for 'r1201', got b'\x07'
+[FAIL] poll_single_frame - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+[FAIL] poll_all_frames - A command returned no frames. Let the RX buffer fill with real CAN traffic.
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[FAIL] timestamp_frames - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+[PASS] rx_buffer_overflow
+[PASS] flags_format
+[FAIL] info_snapshot - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+[FAIL] autopoll_stream - No autopoll frames observed. Ensure the CAN bus is active at 500 kbps.
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[FAIL] filter_query - Unexpected filter query payload: b'W48'
+[FAIL] filter_roundtrip - Unexpected filter query payload: b'W48'
+[PASS] acceptance_code_query
+[PASS] acceptance_code_roundtrip
+[PASS] acceptance_mask_query
+[PASS] acceptance_mask_roundtrip
+[PASS] debug_toggle
+------------------------------------------------------------
+Summary: 22/32 tests passed (68.8%)
+Total duration: 415.81 seconds
+Average test time: 12.99 seconds
+
+Failed tests:
+  - listen_mode_receives_frames: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+  - tx_data_frames: Expected OK for 't1232A5B6', got b'\x07'
+  - tx_rtr_frames: Expected OK for 'r1201', got b'\x07'
+  - poll_single_frame: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+  - poll_all_frames: A command returned no frames. Let the RX buffer fill with real CAN traffic.
+  - timestamp_frames: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+  - info_snapshot: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 500 kbps bus.
+  - autopoll_stream: No autopoll frames observed. Ensure the CAN bus is active at 125 kbps.
+  - filter_query: Unexpected filter query payload: b'W48'
+  - filter_roundtrip: Unexpected filter query payload: b'W48'
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+
+

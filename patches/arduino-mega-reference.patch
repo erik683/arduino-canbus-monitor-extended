@@ -17,7 +17,7 @@ diff -ruN --strip-trailing-cr src/arduino-canbus-MEGAmonitor.ino src/arduino-can
 +#include "SoftwareSerial.h"
 +
 +void setup() {
-+	  Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200. 
++	  Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 500000. 
 +
 +        // Can232::init  (RATE, CLOCK)
 +        // Rates: CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_500KBPS, CAN_1000KBPS, CAN_83K3BPS
@@ -96,7 +96,7 @@ diff -ruN --strip-trailing-cr src/arduino-canbus-monitor.ino src/arduino-canbus-
 -    LcdDiagnostics::begin();
 -    LcdDiagnostics::showSplash();
 -
--    Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200.
+-    Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 500000.
 -    LcdDiagnostics::showSerialReady(LW232_DEFAULT_BAUD_RATE);
 -
 -        // Can232::init  (RATE, CLOCK)

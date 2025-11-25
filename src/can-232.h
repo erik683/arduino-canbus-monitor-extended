@@ -35,7 +35,7 @@
  * 
  * 3. CONFIGURATION CONSTANTS:
  *    - Baud rate tables for serial UART (0-7) and CAN bus (0-9)
- *    - Default settings (115200 serial, 500 kbps CAN, 16 MHz MCP2515 clock)
+ *    - Default settings (500000 serial, 500 kbps CAN, 16 MHz MCP2515 clock)
  *    - Pin assignments (CS pin 10, INT pin 2)
  *    - EEPROM addresses for persistent settings (timestamp, autostart)
  * 
@@ -103,7 +103,7 @@
 //                                   
 //                          CODE   SUPPORTED   SYNTAX               DESCRIPTION     
 //
-#define LW232_CMD_SETUP     'S' //   YES+      Sn[CR]               Setup with standard CAN bit-rates where n is 0-9.
+#define LW232_CMD_SETUP     'S' //   YES+      Sn[CR]               Setup with standard CAN bit-rates where n is 0-9. Bare S[CR] reports current selection.
                                 //                                  S0 10Kbit          S4 125Kbit         S8 1Mbit
                                 //                                  S1 20Kbit          S5 250Kbit         S9 83.3Kbit
                                 //                                  S2 50Kbit          S6 500Kbit
@@ -129,8 +129,11 @@
 #define LW232_CMD_SERIAL    'N' //   YES       N[CR]                Get Serial number of the CAN232.
 #define LW232_CMD_TIMESTAMP 'Z' //   YES       Zn[CR]               Sets Time Stamp ON/OFF for received frames only.
 #define LW232_CMD_AUTOSTART 'Q' //   YES  todo     Qn[CR]               Auto Startup feature (from power on).
+#define LW232_CMD_YANK      'Y' //   custom   Yn[CR]               Yank/reset command (SavvyCAN compatibility)
 #define LW232_CMD_INFO      'i' //   custom   i[CR]               Report runtime statistics (adapter diagnostics)
 #define LW232_CMD_DEBUG     '@' //   custom   @DBGn[CR]            Runtime debug toggle (0=off, 1=on)
+#define LW232_CMD_DEBUG_EXT '#' //   custom   #EXT[CR]             Show raw registers for next extended frame
+#define LW232_CMD_REJECT_EXT '%' //   custom   %EXTn[CR]            Reject extended frames (0=accept, 1=reject)
 
 #define LOW_BYTE(x)     ((unsigned char)((x)&0xFF))
 #define HIGH_BYTE(x)    ((unsigned char)(((x)>>8)&0xFF))
@@ -221,7 +224,7 @@ const INT32U lw232SerialBaudRates[] //PROGMEM
 = { 230400, 115200, 57600, 38400, 19200, 9600, 2400, 500000 };
 
 const INT8U lw232CanBaudRates[] //PROGMEM
-= { CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_500KBPS /*CAN_800KBPS*/, CAN_1000KBPS, CAN_83K3BPS };
+= { CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_800KBPS, CAN_1000KBPS, CAN_83K3BPS };
 
 class Can232
 {
@@ -238,7 +241,7 @@ private:
 
     struct BufferedFrame {
         INT32U id;
-        INT16U timestamp;
+        INT32U timestamp;
         INT8U len;
         INT8U flags;
         INT8U data[8];
@@ -262,17 +265,11 @@ private:
     void loopFunc();
     void serialEventFunc();
     void loopLawicel();
-    void loopGvret();
-    void processGvretSerial();
-    void processGvretByte(INT8U b);
-    bool handleGvretHostFrame();
-    void resetGvretParser();
-    void switchProtocol(INT8U mode);
 
     INT8U (*userAddressFilterFunc)(INT32U addr) = 0;
 
     MCP_CAN lw232CAN = MCP_CAN(LW232_CAN_BUS_SHIELD_CS_PIN);
-    INT8U lw232SerialBaudIndex = 0x01;          // Default to 115200 (index 1)
+    INT8U lw232SerialBaudIndex = LW232_DEFAULT_UART_BAUD_INDEX; // Default to 500000 (index 7)
     INT8U lw232PendingSerialBaudIndex = 0xFF;   // 0xFF => no scheduled change
     bool lw232BitrateConfigured = false;
     INT8U readLawicelStatusFlags();
@@ -286,13 +283,14 @@ private:
     // Hardware acceptance filtering (LAWICEL W/M/m)
     INT8U lw232FilterMode = 0x00;                // 0 = dual (default), 1 = single
     INT8U lw232AcceptanceCode[4] = {0, 0, 0, 0}; // Raw SJA1000-style bytes
-    INT8U lw232AcceptanceMask[4] = {0, 0, 0, 0}; // Raw SJA1000-style bytes
-    bool lw232HwFilterDirty = true;
+    INT8U lw232AcceptanceMask[4] = {0xFF, 0xFF, 0xFF, 0xFF}; // Raw SJA1000-style bytes, default to all bits
 
     INT8U lw232AutoStart = LW232_AUTOSTART_OFF;
     INT8U lw232AutoPoll  = LW232_AUTOPOLL_OFF;
     INT8U lw232TimeStamp = LW232_TIMESTAMP_OFF;
     bool lw232DebugMode = false;
+    bool lw232DebugExtFrames = false;
+    bool lw232RejectExtendedFrames = false;
 
     INT32U lw232CanId = 0;
 
@@ -309,6 +307,12 @@ private:
     // Bus load monitoring
     unsigned long lastBusLoadCalc = 0;
     unsigned long lastBusLoadFrameCount = 0;
+
+    // Output pacing for autopoll to prevent jitter and long bursts
+    static const unsigned int AUTOPOLL_MAX_BATCH_BYTES = 256;  // Stop after ~256 bytes
+    static const unsigned long AUTOPOLL_MAX_BATCH_TIME_MS = 2; // Or ~2ms elapsed
+    unsigned int autopollBatchBytes = 0;
+    unsigned long autopollBatchStartTime = 0;
 
     String inputString = "";         // a string to hold incoming data
     boolean stringComplete = false;  // whether the string is complete
@@ -334,13 +338,7 @@ private:
     INT8U readMsgBufID(INT32U *ID, INT8U *len, INT8U buf[]);
     INT8U receiveSingleFrame();
     void emitFrameToSerial(const BufferedFrame& frame);
-    void emitFrameToGvret(const BufferedFrame& frame);
-    void emitGvretBusParams();
-    void emitGvretDeviceInfo();
-    void emitGvretNumBuses();
-    void emitGvretExtBuses();
-    void emitGvretValidation();
-    void emitGvretTimeSync();
+    unsigned int estimateFrameSize(const BufferedFrame& frame);
     void serviceCanRx();
     RxReadStatus readCanFrame(BufferedFrame& frame);
     bool consumeInterruptFlag();
@@ -348,8 +346,6 @@ private:
     void clearRxBuffer();
     bool pushRxFrame(const BufferedFrame& frame);
     bool popRxFrame(BufferedFrame& frame);
-    void markHardwareFiltersDirty();
-    bool applyHardwareFilters(INT8U targetMode);
 
     INT8U isExtendedFrame();
     INT8U checkPassFilter(INT32U addr);
@@ -361,10 +357,6 @@ private:
     bool  parseCanExtId();
 
     void updateBusLoad();
-    void sendGvretAck();
-    void sendGvretNak();
-    void sendGvretStringResponse(INT8U cmd, const char* str);
-    void emitGvretRxFrames();
 };
 
 class HexHelper {
@@ -380,9 +372,6 @@ public:
     static void byteToHex(INT8U value, char *out);
 };
 
-class Can232Fake : Can232 {
-
-};
 
 
 #endif

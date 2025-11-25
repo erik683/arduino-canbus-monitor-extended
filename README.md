@@ -75,7 +75,20 @@ Before flashing to a vehicle or sharing firmware, run the LAWICEL regression har
 pip install --upgrade pyserial
 python tests/slcan_smoke.py --port /dev/ttyACM0  # set to your device path
 ```
-The suite now drives every implemented LAWICEL command (and the custom `i`/`@DBGn` hooks) against a live 125 kbps CAN bus. See `tests/README.md` for hardware assumptions and the full test matrix.
+The suite now drives every implemented LAWICEL command (and the custom `i`/`@DBGn` hooks) against a live 125 kbps CAN bus.
+
+### Timing and Jitter Tests
+For real-time validation, measure CAN frame timing precision with the jitter test:
+```bash
+python tests/loopback_jitter_test.py --port /dev/ttyACM0 --period 25.0 --jitter-threshold 2.0
+```
+For extended frame IDs (8 hex digits), use the full 8-digit ID:
+```bash
+python tests/loopback_jitter_test.py --port /dev/ttyACM0 --frame-id 1ABCDEF0 --period 10.0
+```
+This injects periodic frames at known intervals and asserts inter-arrival jitter stays within bounds. Requires loopback-capable hardware or a CAN bus that echoes transmitted frames.
+
+See `tests/README.md` for detailed test documentation and hardware requirements.
 
 ## Runtime Telemetry and LCD Display
 
@@ -119,7 +132,7 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | W | Full | `Wn[CR]` or `W[CR]` | Hardware filter mode (W0=dual, W1=single) or query |
 | M | Full | `Mxxxxxxxx[CR]` or `M[CR]` | Set/query acceptance code register (SJA1000-style 4 bytes) |
 | m | Full | `mxxxxxxxx[CR]` or `m[CR]` | Set/query acceptance mask register (SJA1000-style 4 bytes) |
-| U | Full | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-7); 115200 baud recommended |
+| U | Full | `Un[CR]` or `U[CR]` | Set/query UART baud rate (n=0-7); 115200 baud default |
 | V/v | Full | `V[CR]` or `v[CR]` | Get firmware version (V1013) |
 | N | Full | `N[CR]` | Get serial number (NA123) |
 | Z | Full | `Zn[CR]` or `Z[CR]` | Timestamp mode (Z0=off, Z1=on) or query; persists to EEPROM |
@@ -163,7 +176,7 @@ sudo slcan_attach -f -s4 -o /dev/ttyUSB0
 sudo slcand -S 115200 /dev/ttyUSB0 can0  
 sudo ifconfig can0 up
 ```
-where 115200 is port speed, `/dev/ttyUSB0` is the Arduino device path (adjust as needed).
+where 500000 is port speed, `/dev/ttyUSB0` is the Arduino device path (adjust as needed).
 
 ### To dump traffic 
 ```

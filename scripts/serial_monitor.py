@@ -51,7 +51,7 @@ def detect_port(explicit: str | None) -> str:
 
 def monitor_serial(
     port: str,
-    baud: int = 115200,
+    baud: int = 500000,
     log_file: str | None = None,
     timestamp: bool = True,
     filter_lines: list[str] | None = None,
@@ -145,8 +145,8 @@ def main():
     parser.add_argument(
         "--baud", "-b",
         type=int,
-        default=115200,
-        help="Baud rate (default: 115200)"
+        default=500000,
+        help="Baud rate (default: 500000)"
     )
     parser.add_argument(
         "--log", "-l",
@@ -181,4 +181,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

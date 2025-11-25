@@ -1,0 +1,58 @@
+Field suite run @ 2025-11-22 19:07:59
+Port: /dev/ttyACM1
+Baud: 500000
+Environment:
+  timestamp: 2025-11-22T19:00:50.582177
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+[FAIL] listen_mode_receives_frames - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[PASS] uart_speed_change
+[PASS] uart_query
+[PASS] tx_data_frames
+[PASS] tx_rtr_frames
+[FAIL] poll_single_frame - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[FAIL] poll_all_frames - A command returned an error.
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[FAIL] timestamp_frames - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[PASS] rx_buffer_overflow
+[PASS] flags_format
+[FAIL] info_snapshot - Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+[FAIL] autopoll_stream - No autopoll frames observed. Ensure the CAN bus is active at 125 kbps.
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[PASS] filter_query
+[PASS] filter_roundtrip
+[PASS] acceptance_code_query
+[PASS] acceptance_code_roundtrip
+[PASS] acceptance_mask_query
+[PASS] acceptance_mask_roundtrip
+[PASS] debug_toggle
+------------------------------------------------------------
+Summary: 26/32 tests passed (81.2%)
+Total duration: 424.52 seconds
+Average test time: 13.27 seconds
+
+Failed tests:
+  - listen_mode_receives_frames: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - poll_single_frame: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - poll_all_frames: A command returned an error.
+  - timestamp_frames: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - info_snapshot: Timed out waiting for CAN traffic. Ensure the adapter is attached to a live 125 kbps bus.
+  - autopoll_stream: No autopoll frames observed. Ensure the CAN bus is active at 125 kbps.
+

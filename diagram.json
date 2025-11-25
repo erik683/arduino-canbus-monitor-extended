@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "author": "Arduino CAN Bus Monitor",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-arduino-uno",
+      "id": "board",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-can-bus",
+      "id": "can",
+      "top": -100,
+      "left": -50,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-mcp2515",
+      "id": "can-shield",
+      "top": 50,
+      "left": 150,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["can:1", "can-shield:H", "green"],
+    ["can:2", "can-shield:L", "yellow"],
+    ["board:10", "can-shield:SI", "orange"],
+    ["board:11", "can-shield:SO", "blue"],
+    ["board:12", "can-shield:SCK", "green"],
+    ["board:13", "can-shield:CS", "purple"],
+    ["board:5V", "can-shield:VCC", "red"],
+    ["board:GND.1", "can-shield:GND", "black"]
+  ],
+  "dependencies": {}
+}
