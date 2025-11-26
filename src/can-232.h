@@ -66,10 +66,15 @@
 #include "SoftwareSerial.h"
 
 #ifndef LW232_RX_BUFFER_SIZE
-// Default to a 64-frame circular buffer on small MCUs (Uno = 2 KB SRAM).
-// Override in platformio.ini (e.g. -DLW232_RX_BUFFER_SIZE=128) on boards
-// with more RAM such as the Mega2560.
+// Default to a 32-frame circular buffer on AVR-class MCUs (Uno = 2 KB SRAM)
+// to keep RAM headroom for the heap/stack. Override in platformio.ini (e.g.
+// -DLW232_RX_BUFFER_SIZE=128) on boards with more RAM such as the Mega2560
+// or ESP32 variants.
+#if defined(__AVR__)
+#define LW232_RX_BUFFER_SIZE 32
+#else
 #define LW232_RX_BUFFER_SIZE 64
+#endif
 #endif
 
 #ifndef LW232_DEFAULT_UART_BAUD_INDEX
