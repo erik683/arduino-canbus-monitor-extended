@@ -22,7 +22,7 @@ Use this checklist whenever the Windows field run either reports failures or can
 |----------------|-------|----------------------|
 | `P`/`A`/`X` tests timeout | Use a CAN sniffer (SavvyCAN, PCAN) to confirm frames appear and the RX queue drains. Record frame rate and IDs. | Include CAN IDs, parity, and whether frames include timestamps. |
 | `O`/`C`/`S` commands error | Run `S4` then `O`, then `C` manually from a serial terminal. Log the responses (`S4\r`, `O\r`, `C\r`) and note whether the bus reports ERR or BUS OFF. | Capture whether `C` returns `\r` or BEL. |
-| `F`/`i`/`@DBGn` diagnostics misbehave | Dump `i\r` and `@DBG1\r` output (wrap the responses in quotes). Confirm `i` reports sensible counters (frames_rx/tx increase when traffic exists). | Attach the `i` payload and highlight anomalies like zero frames or missing `D` flag. |
+| `F`/`i` diagnostics misbehave | Dump `i\r` output (wrap the responses in quotes). Confirm `i` reports sensible counters (frames_rx/tx increase when traffic exists). | Attach the `i` payload and highlight anomalies like zero frames. |
 | `Z` timestamp persistence fails after reset | Record whether `Z1\r` survives a `reset_device()` (close/reopen port). Note whether the timestamp counter resets. | Mention if the device reverts to `Z0` unexpectedly. |
 | `Q` autostart doesn't behave | Observe whether the channel opens automatically after a reset when `Q1` is enabled. If not, include the `Q\r` reply both before and after reboot. | Add whether the channel stays closed even though `Q1` was set. |
 
@@ -37,7 +37,7 @@ Use the following fields when documenting a failure or environmental problem:
 4. Console/log excerpt (attach `field-suite.log`):
 5. Physical bus details: node count, bitrate, termination, noise?
 6. CAN traffic sample: IDs, data bytes, expected vs. observed behavior.
-7. Additional notes: auto-start and timestamp settings, whether `@DBG` toggles succeeded, whether `SLCAN` commands returned BEL.
+7. Additional notes: auto-start and timestamp settings, whether `SLCAN` commands returned BEL.
 8. Next steps taken (reconnect, power cycle, switch bus, etc.):
 ```
 

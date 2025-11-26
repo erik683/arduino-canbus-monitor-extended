@@ -40,11 +40,6 @@ def test_arduino():
         response = ser.readline().decode('ascii', errors='ignore').strip()
         print(f"Response: '{response}'")
 
-        print("Testing extended frame debug (enable)...")
-        ser.write(b'#EXT\r')
-        response = ser.readline().decode('ascii', errors='ignore').strip()
-        print(f"Response: '{response}'")
-
         # Test runtime stats
         print("Testing runtime stats (i)...")
         ser.write(b'i\r')

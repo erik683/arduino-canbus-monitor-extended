@@ -41,21 +41,14 @@ def test_can_status():
         response = ser.read(10).decode('ascii', errors='ignore').strip()
         print(f"   Response: '{response}'")
 
-        # Test our debug commands
-        print("5. Testing extended frame debug enable (#EXT)...")
-        ser.write(b'#EXT\r')
-        time.sleep(0.1)
-        response = ser.read(20).decode('ascii', errors='ignore').strip()
-        print(f"   Response: '{response}'")
-
-        print("6. Testing extended frame rejection enable (%EXT1)...")
+        print("5. Testing extended frame rejection enable (%EXT1)...")
         ser.write(b'%EXT1\r')
         time.sleep(0.1)
         response = ser.read(30).decode('ascii', errors='ignore').strip()
         print(f"   Response: '{response}'")
 
         # Test runtime stats
-        print("7. Testing runtime stats (i)...")
+        print("6. Testing runtime stats (i)...")
         ser.write(b'i\r')
         time.sleep(0.1)
         response = ser.read(50).decode('ascii', errors='ignore').strip()

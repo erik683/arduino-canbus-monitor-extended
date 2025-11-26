@@ -63,8 +63,6 @@
 
 #include "mcp_can.h"
 #include "mcp_can_dfs.h"
-#include "SoftwareSerial.h"
-
 #ifndef LW232_RX_BUFFER_SIZE
 // Default to a 64-frame circular buffer on small MCUs (Uno = 2 KB SRAM).
 // Override in platformio.ini (e.g. -DLW232_RX_BUFFER_SIZE=128) on boards
@@ -131,8 +129,6 @@
 #define LW232_CMD_AUTOSTART 'Q' //   YES  todo     Qn[CR]               Auto Startup feature (from power on).
 #define LW232_CMD_YANK      'Y' //   custom   Yn[CR]               Yank/reset command (SavvyCAN compatibility)
 #define LW232_CMD_INFO      'i' //   custom   i[CR]               Report runtime statistics (adapter diagnostics)
-#define LW232_CMD_DEBUG     '@' //   custom   @DBGn[CR]            Runtime debug toggle (0=off, 1=on)
-#define LW232_CMD_DEBUG_EXT '#' //   custom   #EXT[CR]             Show raw registers for next extended frame
 #define LW232_CMD_REJECT_EXT '%' //   custom   %EXTn[CR]            Reject extended frames (0=accept, 1=reject)
 
 #define LOW_BYTE(x)     ((unsigned char)((x)&0xFF))
