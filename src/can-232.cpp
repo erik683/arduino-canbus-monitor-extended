@@ -60,11 +60,9 @@ void Can232::initFunc() {
     lw232SerialBaudIndex = LW232_DEFAULT_UART_BAUD_INDEX;
     lw232PendingSerialBaudIndex = 0xFF;
     lw232BitrateConfigured = false;               // Channel stays closed until S command
-    lw232AutoPoll = LW232_AUTOPOLL_ON;           // Autopoll enabled by default
+    lw232AutoPoll = LW232_AUTOPOLL_OFF;           // Autopoll off by default
     lw232AutoStart = LW232_AUTOSTART_OFF;         // SLCAN default: no auto-open
     lw232TimeStamp = LW232_TIMESTAMP_OFF;         // SLCAN default: timestamps off
-    lw232DebugMode = false;
-    lw232DebugExtFrames = false;
     lw232RejectExtendedFrames = true;
     autopollBatchStartTime = 0;
     autopollBatchBytes = 0;
@@ -206,12 +204,14 @@ void Can232::serialEventFunc() {
 }
 
 void Can232::notifyCanInterrupt() {
-    instance()->mcpInterruptPending = true;
+    // Safety check: only set flag if instance exists (prevents crash if interrupt fires before init)
+    Can232* inst = _instance;
+    if (inst != 0) {
+        inst->mcpInterruptPending = true;
+    }
 }
-
 INT8U Can232::exec() {
-    dbg2("Command received:", inputBuffer);
-#ifndef DISABLE_RUNTIME_STATS
+   #ifndef DISABLE_RUNTIME_STATS
     statsRecordCommand();
 #endif
     lw232LastErr = parseAndRunCommand();
@@ -1003,13 +1003,7 @@ INT8U Can232::openCanBus(INT8U mode) {
         }
         delay(25);
     } while (millis() - startTime < timeoutMs);
-
-    if (initStatus == CAN_OK) {
-        // Set the requested mode after successful initialization
-        lw232CAN.setMode(mode);
-    } else {
-        dbg1("CAN initialization timed out");
-    }
+    
 #endif
 
     if (initStatus != CAN_OK) {
