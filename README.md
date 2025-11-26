@@ -51,7 +51,7 @@ newgrp dialout
 ### Configuration
 - Board: Arduino Uno (change env in `platformio.ini`)
 - Libraries: Seeed-Studio CAN_BUS_Shield and `liquidcrystal_i2c` for the optional LCD
-- Receive buffering defaults to 64 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with (example) `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue for heavy traffic.
+- Receive buffering defaults to 32 frames on AVR boards (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`) to preserve SRAM headroom. Override with (example) `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue on larger MCUs (Mega/ESP32/etc.).
 
 ### Changing boards
 To use a different Arduino board, edit `platformio.ini`:
@@ -128,7 +128,7 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | P | Full | `P[CR]` | Poll single frame from RX buffer |
 | A | Full | `A[CR]` | Poll all pending frames from RX buffer |
 | F | Full | `F[CR]` | Read status flags (returns `Fnxx` bitmap) |
-| X | Full | `Xn[CR]` or `X[CR]` | Auto-poll mode (X0=off, X1=on) or query; uses a 64-frame circular RX buffer |
+| X | Full | `Xn[CR]` or `X[CR]` | Auto-poll mode (X0=off, X1=on) or query; uses the configurable circular RX buffer |
 | W | Full | `Wn[CR]` or `W[CR]` | Hardware filter mode (W0=dual, W1=single) or query |
 | M | Full | `Mxxxxxxxx[CR]` or `M[CR]` | Set/query acceptance code register (SJA1000-style 4 bytes) |
 | m | Full | `mxxxxxxxx[CR]` or `m[CR]` | Set/query acceptance mask register (SJA1000-style 4 bytes) |
