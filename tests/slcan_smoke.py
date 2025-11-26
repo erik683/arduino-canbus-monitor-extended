@@ -290,7 +290,6 @@ class AdapterStats:
     drops: int
     overflows: int
     frames_per_second: int
-    debug_enabled: bool
 
 
 def _parse_hex(segment: bytes) -> int:
@@ -395,9 +394,6 @@ def read_adapter_stats(harness: SlcanHarness) -> AdapterStats:
     drops = take(4)
     overflows = take(4)
     fps = take(2)
-    if len(text) <= idx:
-        raise RegressionFailure("Missing debug flag in info payload.")
-    debug_flag = text[idx]
 
     return AdapterStats(
         command_count=command_count,
@@ -407,7 +403,6 @@ def read_adapter_stats(harness: SlcanHarness) -> AdapterStats:
         drops=drops,
         overflows=overflows,
         frames_per_second=fps,
-        debug_enabled=(debug_flag == "D"),
     )
 
 
@@ -885,25 +880,6 @@ def test_uart_query_report(h: SlcanHarness) -> None:
         raise RegressionFailure(f"Unexpected UART query payload: {payload!r}")
 
 
-def test_debug_toggle(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    if b"DEBUG ON" not in h.transact("@DBG1\r"):
-        raise RegressionFailure("Did not receive DEBUG ON banner.")
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    stats = read_adapter_stats(h)
-    if not stats.debug_enabled:
-        raise RegressionFailure("Info snapshot did not report debug mode enabled.")
-    ensure_closed(h)
-    if b"DEBUG OFF" not in h.transact("@DBG0\r"):
-        raise RegressionFailure("Did not receive DEBUG OFF banner.")
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    stats_after = read_adapter_stats(h)
-    if stats_after.debug_enabled:
-        raise RegressionFailure("Debug mode remained on after @DBG0.")
-
-
 def test_periodic_frame_jitter(h: SlcanHarness) -> None:
     """Test periodic frame injection and measure inter-arrival jitter."""
     ensure_autopoll_mode(h, False)
@@ -1042,7 +1018,6 @@ TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("acceptance_code_roundtrip", test_acceptance_code_roundtrip),
     ("acceptance_mask_query", test_acceptance_mask_query_format),
     ("acceptance_mask_roundtrip", test_acceptance_mask_roundtrip),
-    ("debug_toggle", test_debug_toggle),
     ("periodic_frame_jitter", test_periodic_frame_jitter),
 )
 
@@ -1067,11 +1042,6 @@ def reset_test_state(harness: SlcanHarness) -> None:
 
     try:
         harness.expect_ok("X0\r")  # Disable autopoll
-    except Exception:
-        pass  # Ignore cleanup failures
-
-    try:
-        harness.transact("@DBG0\r")
     except Exception:
         pass  # Ignore cleanup failures
 

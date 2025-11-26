@@ -65,14 +65,7 @@ def test_diagnostics():
         response = ser.read(50).decode('ascii', errors='ignore').strip()
         print(f"   '{response}'")
 
-        # Test our custom debug commands
-        print("8. Extended frame debug (#EXT):")
-        ser.write(b'#EXT\r')
-        time.sleep(0.1)
-        response = ser.read(30).decode('ascii', errors='ignore').strip()
-        print(f"   '{response}'")
-
-        print("9. Extended frame rejection (%EXT1):")
+        print("8. Extended frame rejection (%EXT1):")
         ser.write(b'%EXT1\r')
         time.sleep(0.1)
         response = ser.read(30).decode('ascii', errors='ignore').strip()

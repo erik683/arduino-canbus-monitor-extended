@@ -17,7 +17,6 @@ def test_simple():
         # Test just the command characters
         test_commands = [
             ("Version", b'V\r'),
-            ("Hash command", b'#EXT\r'),
             ("Percent command", b'%EXT0\r'),
         ]
 

@@ -75,7 +75,7 @@ Before flashing to a vehicle or sharing firmware, run the LAWICEL regression har
 pip install --upgrade pyserial
 python tests/slcan_smoke.py --port /dev/ttyACM0  # set to your device path
 ```
-The suite now drives every implemented LAWICEL command (and the custom `i`/`@DBGn` hooks) against a live 125 kbps CAN bus.
+The suite now drives every implemented LAWICEL command (plus the custom `i` diagnostics) against a live 125 kbps CAN bus.
 
 ### Timing and Jitter Tests
 For real-time validation, measure CAN frame timing precision with the jitter test:
@@ -102,9 +102,9 @@ See `tests/README.md` for detailed test documentation and hardware requirements.
 - LAWICEL commands share a `BufferedFrame` ring buffer (configured via `LW232_RX_BUFFER_SIZE`) so polls and auto-poll (`P`, `A`, `X`) all drain the same queue without drops when bursts arrive.
 - `HexHelper::parseNibble()` now consults the PROGMEM `HEX_LOOKUP_TABLE` instead of branching math, making frame parsing deterministic and lighter on CPU cycles.
 - Bus load telemetry data lives in `g_canStats`, feeds the optional LCD hook, and keeps drops/overflows counters accurate while the RX pipeline stays buffered.
-- The custom `i[CR]` command serializes runtime stats, letting hosts and terminals see uptime, counts, FPS, and debug mode without extra wiring.
+- The custom `i[CR]` command serializes runtime stats, letting hosts and terminals see uptime, counts, and FPS without extra wiring.
 - The MCP2515 INT pin raises a lightweight ISR, which `Can232::loop()` drains before falling back to the polling path so non-interrupt shields still work while shields with INT pins gain lower latency.
-- Runtime debug tracing can be flipped on and off with `@DBG1[CR]`/`@DBG0[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1`), enabling verbose logs on-demand without reflashing.
+- Runtime debug tracing hooks have been removed from the active firmware now that hardware debug modes are deprecated.
 
 - Remaining enhancement ideas (watchdog timer, error tracking, rate limiting, SPI tuning, etc.) live in `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md`.
 
@@ -137,8 +137,7 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | N | Full | `N[CR]` | Get serial number (NA123) |
 | Z | Full | `Zn[CR]` or `Z[CR]` | Timestamp mode (Z0=off, Z1=on) or query; persists to EEPROM |
 | Q | Full | `Qn[CR]` or `Q[CR]` | Auto-start mode (Q0, Q1, Q2) or query; persists to EEPROM |
-| i | Custom | `i[CR]` | Diagnostic snapshot: `iCCCCRRRRTTTTUUUUddddooooFFD` (hex counters + FPS + debug mode). Requires CAN channel open. |
-| @ | Custom | `@DBGn[CR]` | Runtime debug toggle (0=off, 1=on); requires compile-time ENABLE_CAN_DEBUG_LOGGING=1 |
+| i | Custom | `i[CR]` | Diagnostic snapshot: `iCCCCRRRRTTTTUUUUddddooooFF` (hex counters + FPS). Requires CAN channel open. |
 
 ### Power-on behavior
 - CAN channel: closed by default
@@ -149,11 +148,11 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 
 ### Extras
 - EEPROM settings include corruption recovery and backward compatibility.
-- Regression harness in `tests/slcan_smoke.py` now covers every implemented LAWICEL command (plus `i` and `@DBGn`) against a live 125 kbps bus; SavvyCAN and real CAN hardware were used while authoring the suite.
+- Regression harness in `tests/slcan_smoke.py` now covers every implemented LAWICEL command (plus the `i` diagnostics) against a live 125 kbps bus; SavvyCAN and real CAN hardware were used while authoring the suite.
 - RX pipeline uses a shared circular buffer so `P`, `A`, and `X` read from the same queue without dropping bursts (`src/can-232.h`).
 - Strict serial parser validates LAWICEL command formatting before touching the MCP2515.
 - Bus load telemetry and optional LCD support expose frames-per-second data via `g_canStats`.
-- Runtime debug logging can be enabled with `@DBG1[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1` at compile time) for troubleshooting CAN bus issues.
+- Debug logging commands have been removed now that the hardware path is deprecated.
 
 
 ## PC Software

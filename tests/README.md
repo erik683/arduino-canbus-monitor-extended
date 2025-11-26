@@ -104,7 +104,7 @@ Every LAWICEL command that the firmware implements now has a corresponding real-
 - **Core control**: `S`, `O`, `L`, `C`, `U`, `V/v`, `N` (`test_bitrate_rules`, `test_listen_mode_receives_frames`, `test_uart_speed_change`, etc.).
 - **Transmit path**: `t`, `T`, `r`, `R` update runtime stats in `test_transmit_data_frames_increment_stats` and `test_transmit_rtr_frames_increment_stats`.
 - **Receive path**: `P`, `A`, and `X` are validated by `test_poll_single_frame`, `test_poll_all_frames`, and `test_autopoll_stream`. Timestamping (`Z`) is covered by `test_timestamped_frames_include_counter`.
-- **Diagnostics & telemetry**: `F`, `i`, custom `@DBGn`, and `i` snapshots are exercised via `test_flags_format`, `test_info_snapshot`, and `test_debug_toggle`.
+- **Diagnostics & telemetry**: `F` and the custom `i` snapshots are exercised via `test_flags_format` and `test_info_snapshot`.
 - **Persistence & EEPROM-backed settings**: `Z`, `Q`, and `Q2` are covered by `test_timestamp_persistence`, `test_autostart_persistence`, and `test_autostart_listen_persistence`.
 - **Filtering knobs**: Hardware filter mode plus acceptance code/mask (`W`, `M`, `m`) have round-trip tests that ensure arguments stick only while the channel is closed.
 
