@@ -46,8 +46,14 @@
 #ifndef RUNTIME_STATS_H
 #define RUNTIME_STATS_H
 
+
+#ifndef LW232_ENABLE_STATS
+#define LW232_ENABLE_STATS 0
+#endif
+
 #include <Arduino.h>
 
+#if LW232_ENABLE_STATS
 struct CanRuntimeStats {
     volatile unsigned long commandCount;
     volatile unsigned long framesRx;
@@ -61,6 +67,7 @@ struct CanRuntimeStats {
 };
 
 extern CanRuntimeStats g_canStats;
+#endif  // LW232_ENABLE_STATS
 
 void statsReset();
 void statsRecordCommand();

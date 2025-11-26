@@ -39,6 +39,8 @@
 
 #include "runtime_stats.h"
 
+#if LW232_ENABLE_STATS
+
 static inline void writeMillis(volatile unsigned long &target) {
     target = millis();
 }
@@ -91,3 +93,14 @@ void statsRecordRxOverflow() {
     g_canStats.rxBufferOverflows++;
     interrupts();
 }
+
+#else  // LW232_ENABLE_STATS
+
+void statsReset() {}
+void statsRecordCommand() {}
+void statsRecordRxFrame() {}
+void statsRecordTxFrame() {}
+void statsRecordRxDrop() {}
+void statsRecordRxOverflow() {}
+
+#endif  // LW232_ENABLE_STATS

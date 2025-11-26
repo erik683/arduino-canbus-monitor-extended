@@ -212,7 +212,9 @@ void Can232::notifyCanInterrupt() {
 
 INT8U Can232::exec() {
     dbg2("Command received:", inputString);
+#if LW232_ENABLE_STATS
     statsRecordCommand();
+#endif
     lw232LastErr = parseAndRunCommand();
     switch (lw232LastErr) {
     case LW232_OK:
@@ -734,6 +736,7 @@ INT8U Can232::parseAndRunCommand() {
         }
         break;
     }
+#if LW232_ENABLE_STATS
     case LW232_CMD_INFO: {
         // i[CR] Diagnostic snapshot: iCCCCRRRRTTTTUUUUddddooooFFD
         if (lw232CanChannelMode == LW232_STATUS_CAN_CLOSED) {
@@ -766,6 +769,7 @@ INT8U Can232::parseAndRunCommand() {
         Serial.print(lw232DebugMode ? 'D' : '0');
         break;
     }
+#endif  // LW232_ENABLE_STATS
     case LW232_CMD_YANK: {
         // Yn[CR] Yank/reset command (SavvyCAN compatibility)
         // For now, just accept any parameter and return OK
@@ -893,7 +897,9 @@ INT8U Can232::receiveSingleFrame() {
                 HexHelper::printFullByte(HIGH_BYTE(timestampMs));
                 HexHelper::printFullByte(LOW_BYTE(timestampMs));
             }
+#if LW232_ENABLE_STATS
             statsRecordRxFrame();
+#endif
         }
     }
     else {
@@ -953,7 +959,9 @@ INT8U Can232::openCanBus(INT8U mode) {
 
 
 INT8U Can232::sendMsgBuf(INT32U id, INT8U ext, INT8U rtr, INT8U len, INT8U *buf) {
+#if LW232_ENABLE_STATS
     statsRecordTxFrame();  // Count transmission attempts, not just successes
+#endif
 #ifndef _MCP_FAKE_MODE_
     return lw232CAN.sendMsgBuf(id, ext, rtr, len, buf);
 #else
@@ -1310,7 +1318,9 @@ bool Can232::pushRxFrame(const BufferedFrame& frame) {
     noInterrupts();  // Disable interrupts for atomic operation
     if (rxCount >= LW232_RX_BUFFER_SIZE) {
         interrupts();  // Re-enable interrupts before returning
+#if LW232_ENABLE_STATS
         statsRecordRxOverflow();
+#endif
         return false; // Buffer full
     }
 
@@ -1386,7 +1396,9 @@ Can232::RxReadStatus Can232::readCanFrame(BufferedFrame& frame) {
         }
         memcpy(frame.data, buf, len);
 
+#if LW232_ENABLE_STATS
         statsRecordRxFrame();
+#endif
         return RX_READ_READY;
     } else {
         // Frame filtered out
