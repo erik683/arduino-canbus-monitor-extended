@@ -1,5 +1,32 @@
 # Regression Harness
 
+The `tests/` directory contains all test-related files, scripts, logs, and documentation for the Arduino CAN bus monitor project.
+
+## Test Directory Structure
+
+```
+tests/
+├── slcan_smoke.py              # Main regression test suite (LAWICEL/SLCAN commands)
+├── slcan_smoke_full.py         # Thin alias that delegates to slcan_smoke
+├── loopback_jitter_test.py     # CAN bus timing accuracy tests
+├── run_full_suite.py           # Full test suite runner
+├── test_simple.py              # Simple test utilities
+├── test_serial.py              # Serial communication tests
+├── test_can_status.py          # CAN status and diagnostics tests
+├── test_diagnostics.py         # Diagnostic command tests
+├── blink.ino                   # Arduino blink test sketch
+├── platformio.ini              # PlatformIO configuration for test builds
+├── irl_validation_report.md    # In-real-life validation test report
+├── manual_irl_testing.md       # Manual testing procedures
+└── logs/                       # Test execution logs
+    ├── field-suite_*.log       # Field test suite logs
+    └── irl_validation_*.log    # IRL validation logs
+```
+
+## Main Test Suites
+
+### SLCAN Smoke Tests
+
 The `tests/slcan_smoke.py` script executes a lightweight set of LAWICEL/SLCAN commands against a connected board to confirm the firmware still behaves as expected.
 
 ## Jitter Testing
@@ -48,6 +75,25 @@ python tests/loopback_jitter_test.py --port COM5 --period 10.0 --frame-id 1ABCDE
 
 The test outputs statistics including max jitter, average jitter, and standard deviation for detailed analysis.
 
+## Additional Test Scripts
+
+The tests directory includes several additional test scripts for specific functionality:
+
+- **`test_simple.py`**: Quick sanity checks for a few LAWICEL commands (auto-detects port)
+- **`test_serial.py`**: Serial communication and UART interface tests (auto-detects port)
+- **`test_can_status.py`**: CAN bus status monitoring and diagnostics tests (auto-detects port)
+- **`test_diagnostics.py`**: Diagnostic command and telemetry tests (auto-detects port)
+
+These scripts provide focused testing for specific subsystems and can be run independently or as part of the full test suite.
+
+## Test Logs and Reports
+
+Test execution logs are stored in the `logs/` subdirectory:
+- **Field suite logs**: `field-suite_YYYYMMDD_HHMMSS.log` - Results from field testing sessions
+- **IRL validation logs**: `irl_validation_YYYYMMDD_HHMMSS.log` - In-real-life validation test logs
+
+The `irl_validation_report.md` file contains a comprehensive report of in-real-life validation testing results.
+
 ## Requirements
 
 - Python 3.9+
@@ -59,7 +105,7 @@ The regression harness now validates every implemented LAWICEL command plus the 
 
 - Connect the adapter to an active **125 kbps** CAN bus with at least one other node generating frames continuously.
 - Ensure the partner node acknowledges outgoing frames so `t/T/r/R` tests can observe TX counter changes.
-- Provide at least a few frames per second so polling (`P`/`A`) and autopoll (`X1`) tests can drain the RX queue within ~5 seconds.
+- Provide at least a few frames per second so autopoll (`X1`) tests can drain the RX queue within ~5 seconds.
 - If the bus ever goes idle, the suite will fail with a descriptive timeout—restore live traffic and re-run.
 
 ## Usage
@@ -82,12 +128,30 @@ Environment variable `SLCAN_PORT` can override the auto-detected port.
 | Flag | Description |
 |------|-------------|
 | `--port` | Serial device name. Defaults to `SLCAN_PORT` or the first enumerated port. |
-| `--baud` | UART speed (default `500000`). |
+| `--baud` | UART speed (default `115200`). |
 | `--test NAME` | Run a specific test (repeat flag for multiple). |
 | `--list-tests` | Print the available test names and exit. |
 | `--fail-fast` | Stop immediately when a test fails. |
+| `--verbose` | Print each LAWICEL command/response for troubleshooting (noisy). |
+| `--enable-debug` | Send `@DBG1` once at startup to leave firmware debug logging enabled for the run. |
+| `--allow-debug-chatter` | Allow extra debug text on the serial line without treating it as a failure. |
 
 The harness automatically closes the CAN channel before and after the suite runs to avoid leaving the MCP2515 in an active state.
+
+### Running With/Without Debug Output
+
+- **Verbose debug run** (prints commands/responses and enables firmware debug logging):
+  ```bash
+  python tests/slcan_smoke.py --port /dev/ttyACM0 --verbose --enable-debug
+  ```
+- **Debug-tolerant without enabling debug** (accepts existing debug chatter but keeps firmware quiet):
+  ```bash
+  python tests/slcan_smoke.py --allow-debug-chatter
+  ```
+- **Strict LAWICEL mode** (fails on any debug chatter and asserts debug is off):
+  ```bash
+  python tests/slcan_smoke.py --test strict_protocol_no_debug
+  ```
 
 ### Device Reset Helper
 
@@ -103,10 +167,11 @@ Every LAWICEL command that the firmware implements now has a corresponding real-
 
 - **Core control**: `S`, `O`, `L`, `C`, `U`, `V/v`, `N` (`test_bitrate_rules`, `test_listen_mode_receives_frames`, `test_uart_speed_change`, etc.).
 - **Transmit path**: `t`, `T`, `r`, `R` update runtime stats in `test_transmit_data_frames_increment_stats` and `test_transmit_rtr_frames_increment_stats`.
-- **Receive path**: `P`, `A`, and `X` are validated by `test_poll_single_frame`, `test_poll_all_frames`, and `test_autopoll_stream`. Timestamping (`Z`) is covered by `test_timestamped_frames_include_counter`.
+- **Receive path**: `X` (autopoll) is validated by `test_autopoll_stream`. Timestamping (`Z`) is covered by `test_timestamped_frames_include_counter`.
 - **Diagnostics & telemetry**: `F`, `i`, custom `@DBGn`, and `i` snapshots are exercised via `test_flags_format`, `test_info_snapshot`, and `test_debug_toggle`.
 - **Persistence & EEPROM-backed settings**: `Z`, `Q`, and `Q2` are covered by `test_timestamp_persistence`, `test_autostart_persistence`, and `test_autostart_listen_persistence`.
 - **Filtering knobs**: Hardware filter mode plus acceptance code/mask (`W`, `M`, `m`) have round-trip tests that ensure arguments stick only while the channel is closed.
+- **Protocol hygiene**: `strict_protocol_no_debug` asserts that, with debug disabled and autopoll off, the adapter emits only spec-compliant LAWICEL responses (no stray debug chatter).
 
 Use `python tests/slcan_smoke.py --list-tests` to see the exact names; run individual cases with `--test name`.
 
@@ -123,7 +188,7 @@ Use `python tests/slcan_smoke.py --list-tests` to see the exact names; run indiv
 1. **Refactor field-kit runner**: The `run_full_suite.py` script currently reimplements test execution instead of using `slcan_smoke.run_tests()`. Refactor to delegate to the main test runner and add progress reporting/logging as a wrapper.
 
 
-3. **Configurable timeouts**: Make test timeouts (currently hardcoded at 5 seconds for frame waiting, 3 seconds for A command completion) configurable via command-line arguments to handle different bus speeds and traffic patterns.
+3. **Configurable timeouts**: Make test timeouts (currently hardcoded at 5 seconds for frame waiting) configurable via command-line arguments to handle different bus speeds and traffic patterns.
 
 ### Low Priority Improvements
 
@@ -144,7 +209,7 @@ Use `python tests/slcan_smoke.py --list-tests` to see the exact names; run indiv
 ### Documentation Gaps
 
 1. **Test dependencies**: Document which tests require live CAN traffic vs. loopback scenarios:
-   - Tests needing live traffic: `test_poll_single_frame`, `test_poll_all_frames`, `test_autopoll_stream`, `test_transmit_*_increment_stats`
+   - Tests needing live traffic: `test_autopoll_stream`, `test_transmit_*_increment_stats`
    - Tests that can run offline: `test_version`, `test_serial_number`, `test_close_idempotent`, etc.
 
 2. **Test ordering independence**: Verify and document that tests can run in any order without affecting each other. Current cleanup logic should ensure isolation.

@@ -48,6 +48,19 @@
 
 #include <Arduino.h>
 
+#ifdef DISABLE_RUNTIME_STATS
+
+struct CanRuntimeStats {};
+
+inline void statsReset() {}
+inline void statsRecordCommand() {}
+inline void statsRecordRxFrame() {}
+inline void statsRecordTxFrame() {}
+inline void statsRecordRxDrop() {}
+inline void statsRecordRxOverflow() {}
+
+#else
+
 struct CanRuntimeStats {
     volatile unsigned long commandCount;
     volatile unsigned long framesRx;
@@ -68,5 +81,7 @@ void statsRecordRxFrame();
 void statsRecordTxFrame();
 void statsRecordRxDrop();
 void statsRecordRxOverflow();
+
+#endif  // DISABLE_RUNTIME_STATS
 
 #endif  // RUNTIME_STATS_H

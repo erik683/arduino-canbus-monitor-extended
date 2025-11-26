@@ -38,18 +38,17 @@
  *******************************************************************************/
 
 #include <SPI.h>
+#include <avr/wdt.h>
 #include "mcp_can.h"
 #include "can-232.h"
-#include "runtime_stats.h"
-
-// #define DEBUG_MODE  // Disabled for SavvyCAN LAWICEL compatibility
 
 static void handleCanInterrupt() {
     Can232::notifyCanInterrupt();
 }
 
 void setup() {
-    Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 115200.
+    wdt_disable(); // Always disable first
+    Serial.begin(LW232_DEFAULT_BAUD_RATE); // default COM baud rate is 230400.
 #if defined(LW232_CAN_INT_PIN) && defined(digitalPinToInterrupt)
     pinMode(LW232_CAN_INT_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(LW232_CAN_INT_PIN), handleCanInterrupt, FALLING);
@@ -64,12 +63,13 @@ void setup() {
 
 //        Can232::init();             // rate and clock = LW232_DEFAULT_CAN_RATE and LW232_DEFAULT_CLOCK_FREQ
 //        Can232::init(CAN_125KBPS);  // rate = 125, clock = LW232_DEFAULT_CLOCK_FREQ
-    statsReset();
     Can232::init(CAN_125KBPS, MCP_16MHz); // set default rate you need here and clock frequency of CAN shield. Typically it is 16MHz, but on some MCP2515 + TJA1050 it is 8Mhz
 
     // Optional custom packet filter to reduce message traffic to host software.
     // Uncomment the next line and modify myCustomAddressFilter() to filter specific CAN IDs.
-    // Can232::setFilter(myCustomAddressFilter); 
+    // Can232::setFilter(myCustomAddressFilter);
+
+    wdt_enable(WDTO_1S); // 1 Second timeout
 }
 
 // Example filter function - returns LW232_FILTER_PROCESS to allow message through,
@@ -100,9 +100,7 @@ INT8U myCustomAddressFilter(INT32U addr) {
 }
 
 void loop() {
+    wdt_reset(); // Pet the dog
     Can232::loop();
 }
 
-void serialEvent() {
-    Can232::serialEvent();
-}

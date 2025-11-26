@@ -1,0 +1,67 @@
+Field suite run @ 2025-11-25 10:13:18
+Port: /dev/ttyACM0
+Baud: 115200
+Environment:
+  timestamp: 2025-11-25T09:57:41.478900
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+[PASS] listen_mode_receives_frames
+[PASS] uart_speed_change
+[PASS] uart_query
+[PASS] tx_data_frames
+[PASS] tx_rtr_frames
+[PASS] poll_single_frame
+[PASS] poll_all_frames
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[PASS] timestamp_persistence
+[PASS] timestamp_frames
+[PASS] rx_buffer_overflow
+[PASS] flags_format
+[PASS] info_snapshot
+[FAIL] autopoll_stream - Timed out waiting for completion of the A command response.
+[PASS] autostart_query
+[PASS] autostart_persistence
+[PASS] autostart_listen
+[PASS] filter_query
+[PASS] filter_roundtrip
+[PASS] acceptance_code_query
+[PASS] acceptance_code_roundtrip
+[PASS] acceptance_mask_query
+[PASS] acceptance_mask_roundtrip
+[PASS] debug_toggle
+[FAIL] high_throughput_rx - Timeout waiting for response to 'O\r' (received bytearray(b''))
+[PASS] serial_input_overflow
+[FAIL] extended_frame_rejection - Timeout waiting for response to 'O\r' (received bytearray(b''))
+[FAIL] autopoll_batch_limiting - Timeout waiting for response to 'O\r' (received bytearray(b''))
+[PASS] timestamp_rollover
+[PASS] bus_off_recovery
+[FAIL] command_latency - Slow average latency: 1052.0ms
+[FAIL] periodic_frame_jitter - Expected OK for 'O', got b'\x07'
+[PASS] strict_protocol_no_debug
+------------------------------------------------------------
+Summary: 35/41 tests passed (85.4%)
+Total duration: 931.95 seconds
+Average test time: 22.73 seconds
+
+Failed tests:
+  - autopoll_stream: Timed out waiting for completion of the A command response.
+  - high_throughput_rx: Timeout waiting for response to 'O\r' (received bytearray(b''))
+  - extended_frame_rejection: Timeout waiting for response to 'O\r' (received bytearray(b''))
+  - autopoll_batch_limiting: Timeout waiting for response to 'O\r' (received bytearray(b''))
+  - command_latency: Slow average latency: 1052.0ms
+  - periodic_frame_jitter: Expected OK for 'O', got b'\x07'
+

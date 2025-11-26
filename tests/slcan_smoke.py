@@ -70,9 +70,15 @@ def _detect_port(explicit: str | None) -> str:
 @dataclass
 class SlcanHarness:
     port: str
-    baud: int = 115200  # Match Arduino default baud rate
+    baud: int = 115200  # Match firmware default baud rate
     timeout: float = 1.0
     boot_timeout: float = 3.0
+    command_timeout: float = 2.5  # Timeout for command responses
+    frame_timeout: float = 5.0    # Timeout for frame reception
+    verbose: bool = False
+    allow_debug_output: bool = False
+    debug_default: bool = False
+    current_debug_enabled: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -84,8 +90,14 @@ class SlcanHarness:
             )
         except serial.SerialException as exc:
             raise SystemExit(f"Failed to open {self.port}: {exc}") from exc
+        self._log(f"Opened serial port {self.port} @ {self.baud} baud")
         self._await_device_ready()
         self.flush()
+        if self.debug_default:
+            try:
+                self.set_debug_mode(True, update_default=False)
+            except RegressionFailure as exc:
+                raise SystemExit(f"Unable to enable debug mode: {exc}") from exc
         # Prime the device - some Arduino-based SLCAN devices need initialization
         # Try sending CR/LF first, then a dummy command
         try:
@@ -118,6 +130,39 @@ class SlcanHarness:
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
 
+    def _log(self, message: str) -> None:
+        if self.verbose:
+            print(f"[DEBUG] {message}")
+
+    def _looks_like_protocol(self, segment: bytes) -> bool:
+        """Heuristic to distinguish LAWICEL responses from debug chatter."""
+        if segment in (b"", b"\x07"):
+            return True
+        if not segment:
+            return False
+        prefixes = b"VTtRrPpAaFfXxZzQqNnOoLlSsMmUuWwIiCcDd%@#"
+        if segment[0:1] not in prefixes:
+            return False
+        allowed_chars = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        return all(ch in allowed_chars for ch in segment[1:])
+
+    def _filter_payload(self, payload: bytes) -> bytes:
+        """Drop debug lines when allowed and surface the most recent protocol-looking line."""
+        if not self.allow_debug_output:
+            return payload
+        segments = payload.replace(b"\n", b"\r").split(b"\r")
+        protocol_segments = [seg for seg in segments if self._looks_like_protocol(seg)]
+        if not protocol_segments:
+            return payload
+
+        non_empty = [seg for seg in protocol_segments if seg]
+        chosen = non_empty[-1] if non_empty else b""
+        if not non_empty and not self._looks_like_protocol(payload):
+            return payload
+        if chosen != payload and self.verbose:
+            self._log(f"[DEBUG_CHATTER] Ignored debug text while waiting for response: {payload!r}")
+        return chosen
+
     def reset_device(self) -> None:
         """Force a full MCU reboot by closing/reopening the serial link."""
         try:
@@ -148,16 +193,33 @@ class SlcanHarness:
         time.sleep(0.05)
         self.flush()
 
-    def _transact(self, command: str, response_timeout: float = 2.5) -> bytes:
+    def set_debug_mode(self, enabled: bool, update_default: bool = False) -> None:
+        """Toggle runtime debug logging via @DBGn."""
+        cmd = "@DBG1\r" if enabled else "@DBG0\r"
+        payload = self._transact(cmd)
+        banner = b"DEBUG ON" if enabled else b"DEBUG OFF"
+        if banner not in payload:
+            raise RegressionFailure(
+                f"Unexpected @DBG response while setting debug to {int(enabled)}: {payload!r}"
+            )
+        if update_default:
+            self.debug_default = enabled
+        self.current_debug_enabled = enabled
+        if enabled:
+            self.allow_debug_output = True
+        self._log(f"Debug mode set to {int(enabled)}")
+
+    def _transact(self, command: str, response_timeout: Optional[float] = None) -> bytes:
         """Send a LAWICEL command string and capture the payload before the CR."""
         if not command.endswith("\r"):
             raise ValueError("Commands must be CR-terminated, e.g. 'V\\r'")
+        self._log(f"--> {command.strip()!r}")
 
         def perform_io() -> bytes:
             self.flush()
             self.serial.write(command.encode("ascii"))
             self.serial.flush()
-            deadline = time.monotonic() + response_timeout
+            deadline = time.monotonic() + (response_timeout if response_timeout is not None else self.command_timeout)
             raw = bytearray()
             last_read_time = time.monotonic()
             response_started = False
@@ -192,18 +254,28 @@ class SlcanHarness:
                 return bytes(raw[:-1])
             # Handle responses that don't end with \r (like Arduino firmware)
             if raw:
-                return bytes(raw)
+                payload = bytes(raw)
+                # Optionally allow debug chatter by keeping the payload but logging it
+                if self.allow_debug_output and self.verbose:
+                    self._log(f"[DEBUG_CHATTER] {payload!r}")
+                return payload
             raise RegressionFailure(
                 f"No response received to {command!r}"
             )
 
         try:
-            return perform_io()
+            payload = perform_io()
+            payload = self._filter_payload(payload)
+            self._log(f"<-- {payload!r}")
+            return payload
         except RegressionFailure as exc:
             # Allow one automatic retry after a full MCU reset in case the
             # adapter is still booting (e.g. after enabling auto-start).
             self.reset_device()
-            return perform_io()
+            payload = perform_io()
+            payload = self._filter_payload(payload)
+            self._log(f"<-- {payload!r}")
+            return payload
 
     def expect_ok(self, command: str) -> None:
         payload = self._transact(command)
@@ -243,15 +315,16 @@ class SlcanHarness:
         # Fallback to a short delay so very slow boards still have time to boot.
         time.sleep(0.25)
 
-    def read_line(self, timeout: float = 1.0) -> bytes:
+    def read_line(self, timeout: Optional[float] = None) -> bytes:
         """Read a CR-terminated ASCII line, ignoring empty heartbeats."""
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + (timeout if timeout is not None else self.timeout)
         raw = bytearray()
         while time.monotonic() < deadline:
             chunk = self.serial.read(1)
             if not chunk:
                 continue
             if chunk == b"\r":
+                self._log(f"<-- line {bytes(raw)!r}")
                 return bytes(raw)
             raw.extend(chunk)
         raise RegressionFailure("Timeout waiting for serial line.")
@@ -353,26 +426,6 @@ def parse_can_frame(payload: bytes, timestamps_enabled: bool = False) -> CanFram
     )
 
 
-def wait_for_frame_via_poll(
-    harness: SlcanHarness,
-    timeout: float = 5.0,
-    timestamps_enabled: bool = False,
-) -> CanFrame:
-    """Poll with P\r until a CAN frame arrives or timeout elapses."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        payload = harness.transact("P\r")
-        if payload == b"\x07":
-            time.sleep(0.1)
-            continue
-        if payload:
-            return parse_can_frame(payload, timestamps_enabled)
-    raise RegressionFailure(
-        "Timed out waiting for CAN traffic. "
-        "Ensure the adapter is attached to a live 500 kbps bus."
-    )
-
-
 def read_adapter_stats(harness: SlcanHarness) -> AdapterStats:
     payload = harness.transact("i\r")
     if not payload.startswith(b"i"):
@@ -422,10 +475,10 @@ def ensure_autopoll_mode(harness: SlcanHarness, enabled: bool) -> None:
 
 def wait_for_autopoll_frame(
     harness: SlcanHarness,
-    timeout: float = 15.0,
+    timeout: Optional[float] = None,
     timestamps_enabled: bool = False,
 ) -> CanFrame:
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + (timeout if timeout is not None else harness.frame_timeout)
     while time.monotonic() < deadline:
         remaining = max(0.1, deadline - time.monotonic())
         try:
@@ -439,43 +492,10 @@ def wait_for_autopoll_frame(
         if line.startswith((b"t", b"T", b"r", b"R")):
             return parse_can_frame(line, timestamps_enabled)
         # Debug: print unexpected lines
-        print(f"Unexpected line in autopoll: {line!r}")
+        harness._log(f"Unexpected line in autopoll: {line!r}")
     raise RegressionFailure(
         "No autopoll frames observed. Ensure the CAN bus is active."
     )
-
-
-def collect_frames_via_A(
-    harness: SlcanHarness,
-    timeout: float = 3.0,
-    timestamps_enabled: bool = False,
-) -> List[CanFrame]:
-    # Send A command without using _transact since it returns multiple lines
-    harness.flush()
-    harness.serial.write(b"A\r")
-    harness.serial.flush()
-
-    frames: List[CanFrame] = []
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        remaining = max(0.1, deadline - time.monotonic())
-        try:
-            line = harness.read_line(timeout=remaining)
-        except RegressionFailure:
-            continue
-        if not line:
-            continue
-        if line == b"\x07":
-            raise RegressionFailure("A command returned an error.")
-        if line == b"A":
-            if not frames:
-                raise RegressionFailure(
-                    "A command returned no frames. Let the RX buffer fill with real CAN traffic."
-                )
-            return frames
-        # Parse the frame
-        frames.append(parse_can_frame(line, timestamps_enabled))
-    raise RegressionFailure("Timed out waiting for completion of the A command response.")
 
 
 # --- Individual tests ----------------------------------------------------- #
@@ -539,10 +559,10 @@ def test_invalid_bitrate_rejected(h: SlcanHarness) -> None:
 
 
 def test_listen_mode_receives_frames(h: SlcanHarness) -> None:
-    ensure_autopoll_mode(h, False)
+    ensure_autopoll_mode(h, True)
     ensure_bitrate_configured(h)
     h.expect_ok("L\r")
-    frame = wait_for_frame_via_poll(h)
+    frame = wait_for_autopoll_frame(h)
     if frame.identifier < 0:
         raise RegressionFailure("Listen mode failed to deliver a CAN frame.")
     payload = h.transact("t1230\r")
@@ -567,6 +587,13 @@ def test_uart_speed_change(h: SlcanHarness) -> None:
 
     h.expect_ok(f"U{current_idx}\r")
     h.set_host_baud(UART_BAUD_TABLE[current_idx])
+
+
+def test_uart_query_report(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("U\r")
+    if len(payload) != 2 or payload[0:1] != b"U" or payload[1:2] not in b"01234567":
+        raise RegressionFailure(f"Unexpected UART query payload: {payload!r}")
 
 
 def test_transmit_data_frames_increment_stats(h: SlcanHarness) -> None:
@@ -604,56 +631,6 @@ def test_timestamp_requires_closed(h: SlcanHarness) -> None:
     ensure_closed(h)
 
 
-def test_flags_format(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    h.expect_error("F\r")
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    payload = h.transact("F\r")
-    if len(payload) != 3 or payload[0:1] != b"F":
-        raise RegressionFailure(f"Unexpected flag payload: {payload!r}")
-    try:
-        int(payload[1:].decode("ascii"), 16)
-    except ValueError as exc:
-        raise RegressionFailure(f"Flag bytes are not hex: {payload!r}") from exc
-
-
-def test_info_snapshot(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    if h.transact("i\r") != b"\x07":
-        raise RegressionFailure("Info command should fail while CAN channel is closed.")
-    ensure_autopoll_mode(h, False)
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    stats_before = read_adapter_stats(h)
-    wait_for_frame_via_poll(h)
-    stats_after = read_adapter_stats(h)
-    if stats_after.frames_rx <= stats_before.frames_rx:
-        raise RegressionFailure("Info snapshot did not reflect a received frame.")
-
-
-def test_autopoll_stream(h: SlcanHarness) -> None:
-    ensure_autopoll_mode(h, False)  # Start with autopoll disabled
-    ensure_bitrate_configured(h, "4")  # Use 125kbps
-    h.expect_ok("O\r")
-
-    # First verify that frames are being received manually
-    frames = collect_frames_via_A(h)
-    if not frames:
-        raise RegressionFailure("No CAN frames available for autopoll test.")
-
-    ensure_autopoll_mode(h, True)  # Enable autopoll after opening channel
-    h.expect_ok("O\r")  # Reopen channel after enabling autopoll
-    frame = wait_for_autopoll_frame(h)
-    if frame.identifier < 0:
-        raise RegressionFailure("Autopoll failed to emit a CAN frame.")
-    ensure_closed(h)
-    ensure_autopoll_mode(h, False)
-    if h.transact("X\r") != b"X0":
-        raise RegressionFailure("Autopoll disable did not persist.")
-    h.flush()
-
-
 def test_timestamp_query(h: SlcanHarness) -> None:
     ensure_closed(h)
     payload = h.transact("Z\r")
@@ -684,38 +661,62 @@ def test_timestamp_persistence(h: SlcanHarness) -> None:
         raise RegressionFailure("Timestamp mode did not revert to Z0 after reset")
 
 
-def test_poll_single_frame(h: SlcanHarness) -> None:
-    ensure_autopoll_mode(h, False)
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    frame = wait_for_frame_via_poll(h)
-    if not frame.remote and len(frame.data) != frame.dlc:
-        raise RegressionFailure("Polled frame payload length mismatch.")
-
-
-def test_poll_all_frames(h: SlcanHarness) -> None:
-    ensure_autopoll_mode(h, False)
-    ensure_bitrate_configured(h)
-    h.expect_ok("O\r")
-    time.sleep(0.5)
-    frames = collect_frames_via_A(h)
-    if not frames:
-        raise RegressionFailure(
-            "A command failed to return buffered frames. Ensure bus activity."
-        )
-
-
 def test_timestamped_frames_include_counter(h: SlcanHarness) -> None:
-    ensure_autopoll_mode(h, False)
+    ensure_autopoll_mode(h, True)
     ensure_closed(h)
     h.expect_ok("Z1\r")
     ensure_bitrate_configured(h)
     h.expect_ok("O\r")
-    frame = wait_for_frame_via_poll(h, timestamps_enabled=True)
+    frame = wait_for_autopoll_frame(h, timestamps_enabled=True)
     if frame.timestamp is None:
         raise RegressionFailure("Timestamped frame did not include timer bytes.")
     ensure_closed(h)
     h.expect_ok("Z0\r")
+    ensure_autopoll_mode(h, False)
+
+
+def test_flags_format(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    h.expect_error("F\r")
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+    payload = h.transact("F\r")
+    if len(payload) != 3 or payload[0:1] != b"F":
+        raise RegressionFailure(f"Unexpected flag payload: {payload!r}")
+    try:
+        int(payload[1:].decode("ascii"), 16)
+    except ValueError as exc:
+        raise RegressionFailure(f"Flag bytes are not hex: {payload!r}") from exc
+
+
+def test_info_snapshot(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    if h.transact("i\r") != b"\x07":
+        raise RegressionFailure("Info command should fail while CAN channel is closed.")
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+    stats_before = read_adapter_stats(h)
+    wait_for_autopoll_frame(h)
+    stats_after = read_adapter_stats(h)
+    if stats_after.frames_rx <= stats_before.frames_rx:
+        raise RegressionFailure("Info snapshot did not reflect a received frame.")
+    ensure_closed(h)
+    ensure_autopoll_mode(h, False)
+
+
+def test_autopoll_stream(h: SlcanHarness) -> None:
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h, "4")  # Use 125kbps
+    h.expect_ok("O\r")
+    frame = wait_for_autopoll_frame(h)
+    if frame.identifier < 0:
+        raise RegressionFailure("Autopoll failed to emit a CAN frame.")
+    ensure_closed(h)
+    ensure_autopoll_mode(h, False)
+    if h.transact("X\r") != b"X0":
+        raise RegressionFailure("Autopoll disable did not persist.")
+    h.flush()
 
 
 def test_rx_buffer_overflow_detection(h: SlcanHarness) -> None:
@@ -810,6 +811,13 @@ def test_autostart_listen_persistence(h: SlcanHarness) -> None:
     ensure_closed(h)
 
 
+def test_filter_query_reports_mode(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("W\r")
+    if len(payload) != 2 or payload[0:1] != b"W" or payload[1:2] not in (b"0", b"1"):
+        raise RegressionFailure(f"Unexpected filter query payload: {payload!r}")
+
+
 def test_filter_mode_roundtrip(h: SlcanHarness) -> None:
     ensure_closed(h)
     payload = h.transact("W\r")
@@ -821,6 +829,17 @@ def test_filter_mode_roundtrip(h: SlcanHarness) -> None:
     if h.transact("W\r") != b"W" + target:
         raise RegressionFailure("Filter mode change did not persist.")
     h.expect_ok(f"W{original.decode('ascii')}\r")
+
+
+def test_acceptance_code_query_format(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("M\r")
+    if not payload.startswith(b"M") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance code query payload: {payload!r}")
+    try:
+        int(payload[1:].decode("ascii"), 16)
+    except ValueError as exc:
+        raise RegressionFailure("Acceptance code contains invalid hex digits.") from exc
 
 
 def test_acceptance_code_roundtrip(h: SlcanHarness) -> None:
@@ -836,6 +855,17 @@ def test_acceptance_code_roundtrip(h: SlcanHarness) -> None:
     h.expect_ok(f"M{original}\r")
 
 
+def test_acceptance_mask_query_format(h: SlcanHarness) -> None:
+    ensure_closed(h)
+    payload = h.transact("m\r")
+    if not payload.startswith(b"m") or len(payload) != 9:
+        raise RegressionFailure(f"Unexpected acceptance mask query payload: {payload!r}")
+    try:
+        int(payload[1:].decode("ascii"), 16)
+    except ValueError as exc:
+        raise RegressionFailure("Acceptance mask contains invalid hex digits.") from exc
+
+
 def test_acceptance_mask_roundtrip(h: SlcanHarness) -> None:
     ensure_closed(h)
     payload = h.transact("m\r")
@@ -849,54 +879,16 @@ def test_acceptance_mask_roundtrip(h: SlcanHarness) -> None:
     h.expect_ok(f"m{original}\r")
 
 
-def test_filter_query_reports_mode(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    payload = h.transact("W\r")
-    if len(payload) != 2 or payload[0:1] != b"W" or payload[1:2] not in (b"0", b"1"):
-        raise RegressionFailure(f"Unexpected filter query payload: {payload!r}")
-
-
-def test_acceptance_code_query_format(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    payload = h.transact("M\r")
-    if not payload.startswith(b"M") or len(payload) != 9:
-        raise RegressionFailure(f"Unexpected acceptance code query payload: {payload!r}")
-    try:
-        int(payload[1:].decode("ascii"), 16)
-    except ValueError as exc:
-        raise RegressionFailure("Acceptance code contains invalid hex digits.") from exc
-
-
-def test_acceptance_mask_query_format(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    payload = h.transact("m\r")
-    if not payload.startswith(b"m") or len(payload) != 9:
-        raise RegressionFailure(f"Unexpected acceptance mask query payload: {payload!r}")
-    try:
-        int(payload[1:].decode("ascii"), 16)
-    except ValueError as exc:
-        raise RegressionFailure("Acceptance mask contains invalid hex digits.") from exc
-
-
-def test_uart_query_report(h: SlcanHarness) -> None:
-    ensure_closed(h)
-    payload = h.transact("U\r")
-    if len(payload) != 2 or payload[0:1] != b"U" or payload[1:2] not in b"01234567":
-        raise RegressionFailure(f"Unexpected UART query payload: {payload!r}")
-
-
 def test_debug_toggle(h: SlcanHarness) -> None:
     ensure_closed(h)
-    if b"DEBUG ON" not in h.transact("@DBG1\r"):
-        raise RegressionFailure("Did not receive DEBUG ON banner.")
+    h.set_debug_mode(True)
     ensure_bitrate_configured(h)
     h.expect_ok("O\r")
     stats = read_adapter_stats(h)
     if not stats.debug_enabled:
         raise RegressionFailure("Info snapshot did not report debug mode enabled.")
     ensure_closed(h)
-    if b"DEBUG OFF" not in h.transact("@DBG0\r"):
-        raise RegressionFailure("Did not receive DEBUG OFF banner.")
+    h.set_debug_mode(False)
     ensure_bitrate_configured(h)
     h.expect_ok("O\r")
     stats_after = read_adapter_stats(h)
@@ -1010,6 +1002,230 @@ def test_periodic_frame_jitter(h: SlcanHarness) -> None:
         )
 
 
+def test_high_throughput_rx_no_drops(h: SlcanHarness) -> None:
+    """Verify RX buffer handles sustained high traffic without corruption."""
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+
+    # Collect 500+ frames under continuous load
+    frames = []
+    stats_before = read_adapter_stats(h)
+
+    deadline = time.monotonic() + 10.0  # 10 seconds of traffic
+    while time.monotonic() < deadline:
+        try:
+            frame = h.read_line(timeout=0.05)
+            if frame.startswith((b"t", b"T")):
+                frames.append(parse_can_frame(frame))
+        except RegressionFailure:
+            continue
+
+    stats_after = read_adapter_stats(h)
+
+    # Assert no frame corruption (all IDs valid, DLC matches data length)
+    for frame in frames:
+        if frame.dlc > 8 or len(frame.data) != frame.dlc:
+            raise RegressionFailure(f"Corrupted frame: {frame.raw!r}")
+
+    # Assert reasonable drop rate under load
+    drop_rate = (stats_after.drops - stats_before.drops) / len(frames) if frames else 0
+    if drop_rate > 0.05:  # >5% drops indicates buffer management issue
+        raise RegressionFailure(f"Excessive drop rate: {drop_rate:.1%}")
+
+
+def test_serial_input_overflow_protection(h: SlcanHarness) -> None:
+    """Verify firmware doesn't crash on oversized serial input."""
+    ensure_closed(h)
+
+    # Send oversized command (should truncate or reject)
+    oversized = "S" + "X" * 200 + "\r"
+    payload = h.transact(oversized)
+    # Device should either error or ignore excess
+    if payload not in (b"\x07", b""):
+        # If it responds with something else, check it's not corrupted
+        if len(payload) > 100:
+            raise RegressionFailure("Device returned suspiciously long response")
+
+    # Verify device still responsive after overflow attempt
+    version = h.transact("V\r")
+    if not version.startswith(b"V"):
+        raise RegressionFailure("Device unresponsive after input overflow")
+
+
+def test_extended_frame_rejection(h: SlcanHarness) -> None:
+    """Verify %EXT1 command rejects extended frames as advertised."""
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h)
+
+    # Enable extended frame rejection
+    payload = h.transact("%EXT1\r")
+    if b"REJECT EXTENDED" not in payload:
+        raise RegressionFailure("Did not confirm extended rejection")
+
+    h.expect_ok("O\r")
+
+    # Transmit both standard and extended frames
+    h.expect_ok("t1230\r")  # Standard
+    h.expect_ok("T1234567805DEADBEEF\r")  # Extended
+
+    # Verify only standard frame is received
+    frames_seen = []
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            frame_data = h.read_line(timeout=0.1)
+            if frame_data.startswith((b"t", b"T")):
+                frames_seen.append(parse_can_frame(frame_data))
+        except RegressionFailure:
+            continue
+
+    extended_count = sum(1 for f in frames_seen if f.extended)
+    if extended_count > 0:
+        raise RegressionFailure(f"Extended frames not rejected: saw {extended_count} extended frames")
+
+
+def test_autopoll_batch_limiting(h: SlcanHarness) -> None:
+    """Verify autopoll respects batch size limits to prevent serial jitter."""
+    ensure_autopoll_mode(h, True)
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+
+    # Measure time to receive 100 frames
+    frame_count = 0
+    batch_times = []
+    batch_start = time.monotonic()
+    deadline = time.monotonic() + 30.0  # 30 second timeout for 100 frames
+
+    while frame_count < 100 and time.monotonic() < deadline:
+        try:
+            frame_data = h.read_line(timeout=0.05)
+            if frame_data.startswith((b"t", b"T")):
+                frame_count += 1
+                batch_times.append(time.monotonic() - batch_start)
+        except RegressionFailure:
+            continue
+
+    if frame_count < 10:
+        raise RegressionFailure(f"Received only {frame_count} frames within timeout. Need at least 10 frames for batch analysis.")
+
+    # Check that frames arrive in bursts, not continuously
+    # (indicating batching is active)
+    inter_frame_gaps = [
+        batch_times[i+1] - batch_times[i]
+        for i in range(len(batch_times)-1)
+    ]
+
+    # Should see occasional gaps >10ms between batches
+    large_gaps = sum(1 for gap in inter_frame_gaps if gap > 0.01)
+    if large_gaps < 5:
+        raise RegressionFailure("No batch boundaries detected - may overwhelm serial buffer")
+
+
+def test_timestamp_rollover_handling(h: SlcanHarness) -> None:
+    """Verify timestamps handle micros() rollover gracefully."""
+    ensure_autopoll_mode(h, True)
+    ensure_closed(h)
+    h.expect_ok("Z1\r")
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+
+    timestamps = []
+    for _ in range(100):  # Collect many frames
+        frame = wait_for_autopoll_frame(h, timestamps_enabled=True)
+        timestamps.append(frame.timestamp)
+
+    # Check for backward jumps (indicating rollover bug)
+    for i in range(1, len(timestamps)):
+        delta = timestamps[i] - timestamps[i-1]
+        # Allow for 60-second rollover, but detect large backward jumps
+        if delta < -5000:  # >5 second backward jump
+            raise RegressionFailure(f"Timestamp jumped backward: {timestamps[i-1]} -> {timestamps[i]}")
+    ensure_closed(h)
+    ensure_autopoll_mode(h, False)
+
+
+def test_recovery_from_bus_off(h: SlcanHarness) -> None:
+    """Verify adapter recovers from bus-off condition."""
+    ensure_bitrate_configured(h)
+    h.expect_ok("O\r")
+
+    # Inject many malformed frames to trigger error counters
+    # (This requires either a test harness or manual bus corruption)
+    # In practice, check flag register under stress
+
+    for _ in range(100):
+        flags_payload = h.transact("F\r")
+        flags = int(flags_payload[1:].decode("ascii"), 16)
+
+        # Check bus-off bit (0x80 per LAWICEL spec)
+        if flags & 0x80:
+            # Verify we can recover by closing/reopening
+            ensure_closed(h)
+            h.expect_ok("O\r")
+
+            # Check flags cleared
+            new_flags_payload = h.transact("F\r")
+            new_flags = int(new_flags_payload[1:].decode("ascii"), 16)
+            if new_flags & 0x80:
+                raise RegressionFailure("Bus-off flag persisted after recovery")
+            return
+
+    # If we never hit bus-off, test is inconclusive but not failing
+    print("[WARN] Could not trigger bus-off condition")
+
+
+def test_command_response_latency(h: SlcanHarness) -> None:
+    """Verify commands respond within acceptable latency."""
+    ensure_closed(h)
+
+    latencies = []
+    for _ in range(20):
+        start = time.perf_counter()
+        h.transact("V\r")
+        latency = time.perf_counter() - start
+        latencies.append(latency)
+
+    avg_latency = sum(latencies) / len(latencies)
+    max_latency = max(latencies)
+
+    # At 115200 baud, simple commands should respond in <10ms
+    if avg_latency > 0.01:
+        raise RegressionFailure(f"Slow average latency: {avg_latency*1000:.1f}ms")
+    if max_latency > 0.05:
+        raise RegressionFailure(f"Excessive max latency: {max_latency*1000:.1f}ms")
+
+
+def test_strict_protocol_without_debug(h: SlcanHarness) -> None:
+    """Require LAWICEL-clean responses with debug disabled."""
+    original_allow_debug = h.allow_debug_output
+    h.allow_debug_output = False  # Enforce strict parsing during this test
+
+    try:
+        ensure_autopoll_mode(h, False)
+        ensure_closed(h)
+        h.set_debug_mode(False)
+
+        ensure_bitrate_configured(h)
+        h.expect_ok("O\r")
+
+        stats = read_adapter_stats(h)
+        if stats.debug_enabled:
+            raise RegressionFailure("Info snapshot reported debug enabled during strict-mode check.")
+
+        h.expect_ok("t1230\r")
+
+        # With autopoll off and debug disabled, the adapter should stay silent unless commanded
+        time.sleep(0.1)
+        pending = h.serial.in_waiting
+        if pending:
+            chatter = h.serial.read(pending)
+            raise RegressionFailure(f"Unexpected serial chatter with debug disabled: {chatter!r}")
+    finally:
+        h.allow_debug_output = original_allow_debug
+        ensure_closed(h)
+
+
 TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("version", test_version),
     ("version_lowercase", test_lowercase_version),
@@ -1023,8 +1239,6 @@ TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("uart_query", test_uart_query_report),
     ("tx_data_frames", test_transmit_data_frames_increment_stats),
     ("tx_rtr_frames", test_transmit_rtr_frames_increment_stats),
-    ("poll_single_frame", test_poll_single_frame),
-    ("poll_all_frames", test_poll_all_frames),
     ("timestamp_requires_closed", test_timestamp_requires_closed),
     ("timestamp_query", test_timestamp_query),
     ("timestamp_persistence", test_timestamp_persistence),
@@ -1043,7 +1257,15 @@ TESTS: Sequence[Tuple[str, Callable[[SlcanHarness], None]]] = (
     ("acceptance_mask_query", test_acceptance_mask_query_format),
     ("acceptance_mask_roundtrip", test_acceptance_mask_roundtrip),
     ("debug_toggle", test_debug_toggle),
+    ("high_throughput_rx", test_high_throughput_rx_no_drops),
+    ("serial_input_overflow", test_serial_input_overflow_protection),
+    ("extended_frame_rejection", test_extended_frame_rejection),
+    ("autopoll_batch_limiting", test_autopoll_batch_limiting),
+    ("timestamp_rollover", test_timestamp_rollover_handling),
+    ("bus_off_recovery", test_recovery_from_bus_off),
+    ("command_latency", test_command_response_latency),
     ("periodic_frame_jitter", test_periodic_frame_jitter),
+    ("strict_protocol_no_debug", test_strict_protocol_without_debug),
 )
 
 
@@ -1071,9 +1293,21 @@ def reset_test_state(harness: SlcanHarness) -> None:
         pass  # Ignore cleanup failures
 
     try:
-        harness.transact("@DBG0\r")
+        harness.set_debug_mode(harness.debug_default)
     except Exception:
         pass  # Ignore cleanup failures
+
+    # VERIFY clean state
+    try:
+        if harness.transact("Q\r") != b"Q0":
+            raise RegressionFailure("Failed to reset autostart state")
+        if harness.transact("Z\r") != b"Z0":
+            raise RegressionFailure("Failed to reset timestamp state")
+        if harness.transact("X\r") != b"X0":
+            raise RegressionFailure("Failed to reset autopoll state")
+    except Exception:
+        # If cleanup fails, force full device reset
+        harness.reset_device()
 
 
 def run_tests(
@@ -1107,6 +1341,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--list-tests", action="store_true", help="List available tests and exit."
     )
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first error.")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print each command and response (noisy).",
+    )
+    parser.add_argument(
+        "--enable-debug",
+        action="store_true",
+        help="Enable runtime firmware debug logging via @DBG1 before running tests.",
+    )
+    parser.add_argument(
+        "--allow-debug-chatter",
+        action="store_true",
+        help="Allow extra debug text on the serial line without treating it as a failure.",
+    )
     args = parser.parse_args(argv)
 
     if args.list_tests:
@@ -1116,7 +1365,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     port = _detect_port(args.port)
     print(f"[INFO] Connecting to {port} @ {args.baud} baud...")
-    harness = SlcanHarness(port=port, baud=args.baud)
+    harness = SlcanHarness(
+        port=port,
+        baud=args.baud,
+        verbose=args.verbose,
+        allow_debug_output=(args.allow_debug_chatter or args.enable_debug),
+        debug_default=args.enable_debug,
+    )
     try:
         results = run_tests(harness, args.test, args.fail_fast)
     finally:

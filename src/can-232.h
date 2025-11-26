@@ -112,12 +112,12 @@
 #define LW232_CMD_OPEN      'O' //   YES       O[CR]                Open the CAN channel in normal mode (sending & receiving).
 #define LW232_CMD_LISTEN    'L' //   YES       L[CR]                Open the CAN channel in listen only mode (receiving).
 #define LW232_CMD_CLOSE     'C' //   YES       C[CR]                Close the CAN channel.
+#define LW232_CMD_POLL_ONE  'P' //   YES       P[CR]                Poll incoming FIFO for CAN frames (single poll)
+#define LW232_CMD_POLL_MANY 'A' //   YES       A[CR]                Polls incoming FIFO for CAN frames (all pending frames)
 #define LW232_CMD_TX11      't' //   YES       tiiildd...[CR]       Transmit a standard (11bit) CAN frame.
 #define LW232_CMD_TX29      'T' //   YES       Tiiiiiiiildd...[CR]  Transmit an extended (29bit) CAN frame
 #define LW232_CMD_RTR11     'r' //   YES       riiil[CR]            Transmit an standard RTR (11bit) CAN frame.
 #define LW232_CMD_RTR29     'R' //   YES       Riiiiiiiil[CR]       Transmit an extended RTR (29bit) CAN frame.
-#define LW232_CMD_POLL_ONE  'P' //   YES       P[CR]                Poll incomming FIFO for CAN frames (single poll)
-#define LW232_CMD_POLL_MANY 'A' //   YES       A[CR]                Polls incomming FIFO for CAN frames (all pending frames)
 #define LW232_CMD_FLAGS     'F' //   YES+      F[CR]                Read Status Flags.
 #define LW232_CMD_AUTOPOLL  'X' //   YES       Xn[CR]               Sets Auto Poll/Send ON/OFF for received frames.
 #define LW232_CMD_FILTER    'W' //    -        Wn[CR]               Filter mode setting. By default CAN232 works in dual filter mode (0) and is backwards compatible with previous CAN232 versions.
@@ -165,10 +165,10 @@
 //#define LW232_IS_OK(x) ((x)==LW232_OK ||(x)==LW232_OK_NEW ? TRUE : FALSE)
 
 #define LW232_CR    '\r'
-#define LW232_ALL   'A'
 #define LW232_FLAG  'F'
 #define LW232_TR11  't'
 #define LW232_TR29  'T'
+#define LW232_ALL   'A'
 
 #define LW232_RET_ASCII_OK             0x0D
 #define LW232_RET_ASCII_ERROR          0x07
@@ -182,7 +182,8 @@
 #define LW232_FRAME_MAX_LENGTH         0x08
 #define LW232_FRAME_MAX_SIZE           (sizeof("Tiiiiiiiildddddddddddddddd\r")+1)
 
-#define LW232_INPUT_STRING_BUFFER_SIZE 64
+#define LW232_INPUT_STRING_BUFFER_SIZE 32
+#define LW232_MAX_HW_DRAIN_PER_CALL    5   // Limit hardware drain work per loop iteration
 
 #define LW232_PROTOCOL_LAWICEL         0x00
 
@@ -204,6 +205,10 @@
 #define LW232_AUTOSTART_CHECKSUM_SEED  0x5A
 #define LW232_EEPROM_MAGIC_VALUE       0xA5
 
+#ifndef LW232_ENABLE_EEPROM_PERSISTENCE
+#define LW232_ENABLE_EEPROM_PERSISTENCE 1
+#endif
+
 #define LW232_TIMESTAMP_OFF            0x00
 #define LW232_TIMESTAMP_ON_NORMAL      0x01
 #define LW232_OFFSET_STD_PKT_LEN       0x04
@@ -212,7 +217,7 @@
 #define LW232_OFFSET_EXT_PKT_DATA      0x0A
 
 
-#define LW232_DEFAULT_BAUD_RATE        115200
+#define LW232_DEFAULT_BAUD_RATE        230400
 #define LW232_DEFAULT_CAN_RATE         CAN_500KBPS
 #define LW232_DEFAULT_CLOCK_FREQ       MCP_16MHz
 
@@ -220,10 +225,10 @@
 #define LW232_UART_BAUD_NUM            0x08
 
 
-const INT32U lw232SerialBaudRates[] //PROGMEM
+const INT32U lw232SerialBaudRates[] PROGMEM
 = { 230400, 115200, 57600, 38400, 19200, 9600, 2400, 500000 };
 
-const INT8U lw232CanBaudRates[] //PROGMEM
+const INT8U lw232CanBaudRates[] PROGMEM
 = { CAN_10KBPS, CAN_20KBPS, CAN_50KBPS, CAN_100KBPS, CAN_125KBPS, CAN_250KBPS, CAN_500KBPS, CAN_800KBPS, CAN_1000KBPS, CAN_83K3BPS };
 
 class Can232
@@ -240,15 +245,16 @@ private:
     static Can232* instance();
 
     struct BufferedFrame {
-        INT32U id;
-        INT32U timestamp;
-        INT8U len;
-        INT8U flags;
-        INT8U data[8];
+        INT32U timestamp; // 4 bytes
+        INT32U id;        // 4 bytes
+        INT8U data[8];    // 8 bytes
+        INT8U len;        // 1 byte
+        INT8U flags;      // 1 byte
+        // Total: 18 bytes.
     };
 
 #if defined(__AVR__)
-    // Keep the RX queue from consuming more than half of the available SRAM on AVR
+    // Keep the RX queue from consuming more than 66% of the available SRAM on AVR
     // boards (prevents silent heap allocation failures on 2 KB parts like the Uno).
     static_assert(LW232_RX_BUFFER_SIZE * sizeof(BufferedFrame) <= (RAMEND - RAMSTART + 1) / 2,
                   "LW232_RX_BUFFER_SIZE is too large for this AVR's SRAM budget");
@@ -269,7 +275,7 @@ private:
     INT8U (*userAddressFilterFunc)(INT32U addr) = 0;
 
     MCP_CAN lw232CAN = MCP_CAN(LW232_CAN_BUS_SHIELD_CS_PIN);
-    INT8U lw232SerialBaudIndex = LW232_DEFAULT_UART_BAUD_INDEX; // Default to 500000 (index 7)
+    INT8U lw232SerialBaudIndex = LW232_DEFAULT_UART_BAUD_INDEX; // 
     INT8U lw232PendingSerialBaudIndex = 0xFF;   // 0xFF => no scheduled change
     bool lw232BitrateConfigured = false;
     INT8U readLawicelStatusFlags();
@@ -307,14 +313,23 @@ private:
     unsigned long lastBusLoadFrameCount = 0;
 
     // Output pacing for autopoll to prevent jitter and long bursts
-    static const unsigned int AUTOPOLL_MAX_BATCH_BYTES = 256;  // Stop after ~256 bytes
-    static const unsigned long AUTOPOLL_MAX_BATCH_TIME_MS = 2; // Or ~2ms elapsed
+    static const unsigned int AUTOPOLL_MAX_BATCH_BYTES = 128;  // Stop after ~128 bytes
+    static const unsigned long AUTOPOLL_MAX_BATCH_TIME_MS = 1; // Or ~1ms elapsed
+    static const unsigned int AUTOPOLL_MAX_FRAMES_PER_BATCH = 16;
+    static const unsigned long AUTOPOLL_BATCH_COOLDOWN_MS = 12; // Create visible inter-batch gaps
+    static const unsigned long AUTOPOLL_POST_OPEN_SILENCE_MS = 200; // Allow ack to complete before flooding serial
     unsigned int autopollBatchBytes = 0;
     unsigned long autopollBatchStartTime = 0;
+    unsigned long autopollCooldownUntilMs = 0;
+    bool autopollPostOpenSilencePending = false;
 
-    String inputString = "";         // a string to hold incoming data
+    char inputBuffer[LW232_INPUT_STRING_BUFFER_SIZE] = {0};
+    uint8_t inputIndex = 0;
+    bool inputOverflowed = false;
     boolean stringComplete = false;  // whether the string is complete
     volatile bool mcpInterruptPending = false;
+    uint32_t lastTimestampMicros = 0;
+    uint64_t microsRolloverOffsetUs = 0;
 
     INT8U parseAndRunCommand();
     INT8U exec();
@@ -341,9 +356,12 @@ private:
     RxReadStatus readCanFrame(BufferedFrame& frame);
     bool consumeInterruptFlag();
     bool rxBufferEmpty() const;
+    bool peekRxFrame(BufferedFrame& frame) const;
     void clearRxBuffer();
     bool pushRxFrame(const BufferedFrame& frame);
     bool popRxFrame(BufferedFrame& frame);
+    INT16U buildTimestampMs(INT32U capturedMicros);
+    void postponeAutopollAfterOpen();
 
     INT8U isExtendedFrame();
     INT8U checkPassFilter(INT32U addr);

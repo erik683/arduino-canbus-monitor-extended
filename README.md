@@ -22,7 +22,8 @@ pio run
 pio run --target upload
 pio device monitor
 ```
-Adjust `monitor_port` and `upload_port` in `platformio.ini` to match your device (defaults to `/dev/ttyACM1` in WSL). Serial baud rate is 115200.
+Adjust `monitor_port` and `upload_port` in `platformio.ini` to match your device (defaults to `/dev/ttyACM0` in WSL). Serial baud rate is 115200.
+Use `uno-debug` for full diagnostics (debug logging + runtime stats) and `uno-release` for the smallest, fastest build (debug logging and runtime stats compiled out).
 
 ### Arduino setup (WSL + Windows bridge)
 The board shows up as a COM port in Windows; Device Manager will list the exact number. In WSL it typically appears as `/dev/ttyACMx`.
@@ -52,6 +53,7 @@ newgrp dialout
 - Board: Arduino Uno (change env in `platformio.ini`)
 - Libraries: Seeed-Studio CAN_BUS_Shield and `liquidcrystal_i2c` for the optional LCD
 - Receive buffering defaults to 64 frames (`LW232_RX_BUFFER_SIZE` in `src/can-232.h`). Override with (example) `build_flags = -DLW232_RX_BUFFER_SIZE=128` in `platformio.ini` if you need a deeper queue for heavy traffic.
+- Firmware builds compile in runtime debug toggles (`@DBGn`) and EEPROM-backed persistence for `Z`/`Q`; debug envs keep symbols with `-g3`, release envs keep optimizations.
 
 ### Changing boards
 To use a different Arduino board, edit `platformio.ini`:
@@ -74,6 +76,10 @@ Before flashing to a vehicle or sharing firmware, run the LAWICEL regression har
 ```bash
 pip install --upgrade pyserial
 python tests/slcan_smoke.py --port /dev/ttyACM0  # set to your device path
+# Optional: show every command/response and turn on firmware debug logging (@DBG1)
+python tests/slcan_smoke.py --port /dev/ttyACM0 --verbose --enable-debug
+# Optional: strict protocol check that fails on any debug chatter
+python tests/slcan_smoke.py --test strict_protocol_no_debug
 ```
 The suite now drives every implemented LAWICEL command (and the custom `i`/`@DBGn` hooks) against a live 125 kbps CAN bus.
 
@@ -92,17 +98,17 @@ See `tests/README.md` for detailed test documentation and hardware requirements.
 
 ## Runtime Telemetry and LCD Display
 
-- `src/runtime_stats.cpp` tracks command, RX, and TX counters, last activity timestamps, RX buffer drops/overflows, and the current frames-per-second value via the `g_canStats` globals.
+- `src/runtime_stats.cpp` tracks command, RX, and TX counters, last activity timestamps, RX buffer drops/overflows, and the current frames-per-second value via the `g_canStats` globals (compiled out in size/speed builds).
 - `Can232::updateBusLoad()` updates `currentFramesPerSecond` once per second.
 - Send the custom `i[CR]` LAWICEL command after opening the bus to dump a snapshot: `iCCCCRRRRTTTTUUUUddddooooFF` (hex-encoded counters for commands/RX/TX/uptime/drops/overflows plus the current FPS byte). The handler lives in `src/can-232.cpp`.
 - `src/lcd_display.cpp` drives an optional 16x2 I2C LCD. Line 1 shows a startup banner or status set via `LcdDisplay::updateStatus()`, while line 2 displays RX FPS. If no LCD is present the firmware runs normally.
 
 ## Implemented Enhancements
 
-- LAWICEL commands share a `BufferedFrame` ring buffer (configured via `LW232_RX_BUFFER_SIZE`) so polls and auto-poll (`P`, `A`, `X`) all drain the same queue without drops when bursts arrive.
+- LAWICEL commands share a `BufferedFrame` ring buffer (configured via `LW232_RX_BUFFER_SIZE`) so auto-poll (`X`) and transmit paths drain the same queue without drops when bursts arrive.
 - `HexHelper::parseNibble()` now consults the PROGMEM `HEX_LOOKUP_TABLE` instead of branching math, making frame parsing deterministic and lighter on CPU cycles.
 - Bus load telemetry data lives in `g_canStats`, feeds the optional LCD hook, and keeps drops/overflows counters accurate while the RX pipeline stays buffered.
-- The custom `i[CR]` command serializes runtime stats, letting hosts and terminals see uptime, counts, FPS, and debug mode without extra wiring.
+- The custom `i[CR]` command serializes runtime stats, letting hosts and terminals see uptime, counts, FPS, and debug mode without extra wiring. This is available in `uno-debug`; lean builds (`uno-release`, `uno-speed`) skip runtime stats and debug logging for smaller binaries.
 - The MCP2515 INT pin raises a lightweight ISR, which `Can232::loop()` drains before falling back to the polling path so non-interrupt shields still work while shields with INT pins gain lower latency.
 - Runtime debug tracing can be flipped on and off with `@DBG1[CR]`/`@DBG0[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1`), enabling verbose logs on-demand without reflashing.
 
@@ -125,8 +131,6 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 | T | Full | `Tiiiiiiiildd...[CR]` | Transmit extended 29-bit CAN frame |
 | r | Full | `riiil[CR]` | Transmit standard 11-bit RTR frame |
 | R | Full | `Riiiiiiiil[CR]` | Transmit extended 29-bit RTR frame |
-| P | Full | `P[CR]` | Poll single frame from RX buffer |
-| A | Full | `A[CR]` | Poll all pending frames from RX buffer |
 | F | Full | `F[CR]` | Read status flags (returns `Fnxx` bitmap) |
 | X | Full | `Xn[CR]` or `X[CR]` | Auto-poll mode (X0=off, X1=on) or query; uses a 64-frame circular RX buffer |
 | W | Full | `Wn[CR]` or `W[CR]` | Hardware filter mode (W0=dual, W1=single) or query |
@@ -142,15 +146,15 @@ This project implements the LAWICEL CAN232/CANUSB ASCII protocol v1.3 plus a dia
 
 ### Power-on behavior
 - CAN channel: closed by default
-- Bit-rate: must be set with `Sn` before opening the channel
-- Auto-start: disabled by default (enable with `Q1` or `Q2` to auto-open on boot)
-- Serial port: available immediately at 115200 baud
+  - Bit-rate: must be set with `Sn` before opening the channel
+  - Auto-start: disabled by default (enable with `Q1` or `Q2` to auto-open on boot)
+  - Serial port: available immediately at 115200 baud
 - Timestamp: off by default (enable with `Z1`)
 
 ### Extras
 - EEPROM settings include corruption recovery and backward compatibility.
 - Regression harness in `tests/slcan_smoke.py` now covers every implemented LAWICEL command (plus `i` and `@DBGn`) against a live 125 kbps bus; SavvyCAN and real CAN hardware were used while authoring the suite.
-- RX pipeline uses a shared circular buffer so `P`, `A`, and `X` read from the same queue without dropping bursts (`src/can-232.h`).
+- RX pipeline uses a shared circular buffer so `X` can stream frames without dropping bursts (`src/can-232.h`).
 - Strict serial parser validates LAWICEL command formatting before touching the MCP2515.
 - Bus load telemetry and optional LCD support expose frames-per-second data via `g_canStats`.
 - Runtime debug logging can be enabled with `@DBG1[CR]` (requires `ENABLE_CAN_DEBUG_LOGGING=1` at compile time) for troubleshooting CAN bus issues.
@@ -193,7 +197,7 @@ sudo killall slcand
 
 - `WSL_USB_SETUP.md` - detailed WSL2 USB device setup guide
 - `docs/WSL_GUI_AUTOMATION.md` - guide for GUI automation in WSL (WSLg/X11 setup, xdotool, pyautogui)
-- `scripts/README.md` - automation scripts for SavvyCAN and serial monitoring
+- `scripts/README.md` - serial monitoring helpers and quick-start tips
 - `docs/plans/ENHANCEMENT_RECOMMENDATIONS.md` - outstanding roadmap items covering watchdog, error tracking, rate limiting, filtering, and SPI tuning; README now highlights the improvements already merged.
 - `docs/plans/lawicel-filtering-plan.md` - draft ideas for LAWICEL filtering configuration (moved for consistency, no content changes).
 - `GIT_CHEATSHEET.md` - Git workflow reference for contributors

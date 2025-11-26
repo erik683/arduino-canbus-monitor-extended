@@ -1,3 +1,6 @@
+#ifdef DISABLE_RUNTIME_STATS
+// Runtime stats are compiled out.
+#else
 /*******************************************************************************
  * FILE: runtime_stats.cpp
  * 
@@ -91,3 +94,5 @@ void statsRecordRxOverflow() {
     g_canStats.rxBufferOverflows++;
     interrupts();
 }
+
+#endif  // DISABLE_RUNTIME_STATS

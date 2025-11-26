@@ -1,0 +1,39 @@
+Field suite run @ 2025-11-25 20:19:24
+Port: /dev/ttyACM0
+Baud: 115200
+Environment:
+  timestamp: 2025-11-25T20:14:37.847203
+  python_version: 3.12.3
+  platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+  architecture: 64bit
+  hostname: Mainframe
+  working_directory: /home/erikm/arduino-canbus-monitor/tests
+  script_path: /home/erikm/arduino-canbus-monitor/tests/run_full_suite.py
+
+------------------------------------------------------------
+[PASS] version
+[PASS] version_lowercase
+[PASS] serial
+[PASS] close_idempotent
+[PASS] open_requires_bitrate
+[PASS] bitrate_rules
+[PASS] invalid_bitrate_rejected
+[FAIL] listen_mode_receives_frames - Timeout waiting for response to 'L\r' (received bytearray(b''))
+[PASS] uart_speed_change
+[PASS] uart_query
+[FAIL] tx_data_frames - Unexpected info payload: b'\x07'
+[FAIL] tx_rtr_frames - Unexpected info payload: b'\x07'
+[PASS] timestamp_requires_closed
+[PASS] timestamp_query
+[FAIL] timestamp_persistence - Timeout waiting for response to 'Z\r' (received bytearray(b''))
+------------------------------------------------------------
+Summary: 11/15 tests passed (73.3%)
+Total duration: 281.89 seconds
+Average test time: 18.79 seconds
+
+Failed tests:
+  - listen_mode_receives_frames: Timeout waiting for response to 'L\r' (received bytearray(b''))
+  - tx_data_frames: Unexpected info payload: b'\x07'
+  - tx_rtr_frames: Unexpected info payload: b'\x07'
+  - timestamp_persistence: Timeout waiting for response to 'Z\r' (received bytearray(b''))
+

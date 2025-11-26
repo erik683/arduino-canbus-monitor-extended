@@ -39,3 +39,4 @@ Thumbs.db
 *.exe
 *.code-workspace
 testing_export/
+tests/__init__.py

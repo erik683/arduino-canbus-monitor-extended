@@ -120,6 +120,7 @@ private:
 
     INT8U mcp2515_readStatus(void);                                     /* read mcp2515's Status        */
     INT8U mcp2515_setCANCTRL_Mode(const INT8U newmode);                 /* set mode                     */
+    INT8U mcp2515_requestNewMode(const INT8U newmode);                  /* set mode with polling        */
     INT8U mcp2515_configRate(const INT8U canSpeed, const INT8U clock);  /* set boadrate                 */
     INT8U mcp2515_init(const INT8U canSpeed, const INT8U clock);        /* mcp2515init                  */
 
