@@ -308,10 +308,6 @@ private:
     volatile INT16U rxTail = 0;
     volatile INT16U rxCount = 0;
 
-    // Bus load monitoring
-    unsigned long lastBusLoadCalc = 0;
-    unsigned long lastBusLoadFrameCount = 0;
-
     // Output pacing for autopoll to prevent jitter and long bursts
     static const unsigned int AUTOPOLL_MAX_BATCH_BYTES = 128;  // Stop after ~128 bytes
     static const unsigned long AUTOPOLL_MAX_BATCH_TIME_MS = 1; // Or ~1ms elapsed
